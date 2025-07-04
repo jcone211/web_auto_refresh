@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "网页定时刷新器",
+  "version": "1.0",
+  "description": "定时刷新指定网页的Chrome插件",
+  "permissions": [
+    "storage",
+    "windows",
+    "alarms",
+    "idle",
+    "notifications",
+    "tabs"
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/war_icon_16x16.png",
+      "48": "icons/war_icon_48x48.png",
+      "128": "icons/war_icon_128x128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icons/war_icon_16x16.png",
+    "48": "icons/war_icon_48x48.png",
+    "128": "icons/war_icon_128x128.png"
+  }
+}
