@@ -27,7 +27,7 @@ function startRefresh(interval, url, selectorName) {
     // 创建定时器
     chrome.alarms.create('refreshTimer', {
         delayInMinutes: 0,
-        periodInMinutes: (refreshInterval / 60) < 0.5 ? 0.5 : refreshInterval / 60
+        periodInMinutes: refreshInterval / 60
     });
 }
 

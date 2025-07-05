@@ -28,12 +28,17 @@ chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
 // 开始刷新按钮点击事件
 startBtn.addEventListener('click', () => {
     const url = urlInput.value.trim();
-    const interval = parseInt(intervalInput.value);
+    let interval = parseInt(intervalInput.value);
     selectorName = selectorEl.value;
 
     if (!url) {
         alert('请输入有效的URL');
         return;
+    }
+
+    if (interval < 30) {
+        interval = 30;
+        intervalInput.value = 30;
     }
 
     chrome.runtime.sendMessage({
