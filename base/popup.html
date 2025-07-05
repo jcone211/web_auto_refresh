@@ -15,6 +15,11 @@
             margin-bottom: 15px;
         }
 
+        .container {
+            display: flex;
+            justify-content: space-between;
+        }
+
         label {
             display: block;
             margin-bottom: 5px;
@@ -62,7 +67,11 @@
         <input type="text" id="url" placeholder="https://example.com">
     </div>
     <div class="form-group">
-        <label for="interval">刷新间隔(秒):</label>
+        <label for="interval">选择器名称(若为id选择器在最前方加#，若为class选择器则使用.开头，例如#exm或.exm1.exm2)：</label>
+        <input type="text" id="selectorName">
+    </div>
+    <div class="form-group">
+        <label for="interval">刷新间隔(30秒及以上):</label>
         <input type="number" disabled id="interval" min="30" value="60">
     </div>
     <button id="startBtn">开始刷新</button>
@@ -70,7 +79,12 @@
     <div id="status" class="inactive">
         状态: 未运行
     </div>
-    <p id="refreshCount">已刷新次数：0</p>
+    <div class="container">
+        <p id="refreshCount">已刷新次数：0</p>
+        <p id="refreshTime">监听数据更新时间：</p>
+    </div>
+    <p id="monitorData">监听数据：</p>
+
     <script type="module" src="./popup.js"></script>
 </body>
 

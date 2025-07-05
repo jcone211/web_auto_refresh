@@ -1,28 +1,29 @@
 // 后台服务worker，处理定时刷新逻辑
 let refreshInterval = 30; // 默认30秒
 let targetUrl = 'https://github.com/';
+let selectorName = '';
 
 
-// 监听来自popup的消息
+// 监听来自popup和content script的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'startRefresh') {
-        startRefresh(request.interval, request.url);
+        startRefresh(request.interval, request.url, request.selectorName);
         sendResponse({ status: 'started' });
     } else if (request.action === 'stopRefresh') {
         stopRefresh();
         sendResponse({ status: 'stopped' });
     } else if (request.action === 'getStatus') {
-        sendResponse({ refreshInterval, targetUrl });
+        sendResponse({ refreshInterval, targetUrl, selectorName });
     }
 });
 
 // 开始定时刷新
-function startRefresh(interval, url) {
+function startRefresh(interval, url, selectorName) {
     refreshInterval = interval;
     targetUrl = url;
 
     // 保存设置
-    chrome.storage.local.set({ refreshInterval, targetUrl });
+    chrome.storage.local.set({ refreshInterval, targetUrl, selectorName });
     // 创建定时器
     chrome.alarms.create('refreshTimer', {
         delayInMinutes: 0,
@@ -42,18 +43,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
             if (tabs.length > 0) {
                 chrome.tabs.reload(tabs[0].id);
                 chrome.runtime.sendMessage({ action: "addRefreshCount" });
+            } else {
+                chrome.tabs.create({ url: targetUrl });
+                chrome.runtime.sendMessage({ action: "initRefreshCount" });
             }
         });
     }
 });
 
 // 初始化时加载保存的设置
-chrome.storage.local.get(['refreshInterval', 'targetUrl'], (result) => {
+chrome.storage.local.get(['refreshInterval', 'targetUrl', 'selectorName'], (result) => {
     if (result.refreshInterval) {
         refreshInterval = result.refreshInterval;
     }
     if (result.targetUrl) {
         targetUrl = result.targetUrl;
+    }
+    if (result.selectorName) {
+        selectorName = result.selectorName;
     }
 });
 
@@ -70,7 +77,7 @@ chrome.action.onClicked.addListener(() => {
                     url: chrome.runtime.getURL('popup.html'),
                     type: 'popup',
                     width: 360,
-                    height: 450,
+                    height: 580,
                     left: currentWindow.width - 400,
                     top: 50
                 }, (newWindow) => {
