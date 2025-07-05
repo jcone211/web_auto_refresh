@@ -13,3 +13,7 @@
 输入刷新间隔，30s 及以上
 
 点击开始刷新
+
+案例：小黑盒首条推荐内容监听
+![alt text](images/README/1751693568115.png)
+![alt text](images/README/1751693846033.png)
