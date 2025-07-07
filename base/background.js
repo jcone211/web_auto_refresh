@@ -3,8 +3,53 @@ let refreshInterval = 30; // 默认30秒
 let targetUrl = 'https://github.com/';
 let selectorName = '';
 
+chrome.action.onClicked.addListener(() => {
+    chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
+        if (popupWindowId !== null && popupWindowId !== undefined) {
+            chrome.windows.remove(popupWindowId, () => {
+                chrome.storage.local.set({ popupWindowId: null });
+            });
+        } else {
+            chrome.windows.getCurrent((currentWindow) => {
+                chrome.windows.create({
+                    url: chrome.runtime.getURL('popup.html'),
+                    type: 'popup',
+                    width: 360,
+                    height: 580,
+                    left: currentWindow.width - 400,
+                    top: 50
+                }, (newWindow) => {
+                    chrome.storage.local.set({ popupWindowId: newWindow.id });
+                });
+            });
+        }
+    })
+});
 
-// 监听来自popup和content script的消息
+// 监听窗口关闭
+chrome.windows.onRemoved.addListener((closedWindowId) => {
+    chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
+        if (closedWindowId === popupWindowId) {
+            chrome.storage.local.set({ popupWindowId: null });
+        }
+    })
+    chrome.alarms.clear('refreshTimer');
+});
+
+// 初始化时加载保存的设置
+chrome.storage.local.get(['refreshInterval', 'targetUrl', 'selectorName'], (result) => {
+    if (result.refreshInterval) {
+        refreshInterval = result.refreshInterval;
+    }
+    if (result.targetUrl) {
+        targetUrl = result.targetUrl;
+    }
+    if (result.selectorName) {
+        selectorName = result.selectorName;
+    }
+});
+
+// 监听消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'startRefresh') {
         startRefresh(request.interval, request.url, request.selectorName);
@@ -51,49 +96,3 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     }
 });
 
-// 初始化时加载保存的设置
-chrome.storage.local.get(['refreshInterval', 'targetUrl', 'selectorName'], (result) => {
-    if (result.refreshInterval) {
-        refreshInterval = result.refreshInterval;
-    }
-    if (result.targetUrl) {
-        targetUrl = result.targetUrl;
-    }
-    if (result.selectorName) {
-        selectorName = result.selectorName;
-    }
-});
-
-
-chrome.action.onClicked.addListener(() => {
-    chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
-        if (popupWindowId !== null && popupWindowId !== undefined) {
-            chrome.windows.remove(popupWindowId, () => {
-                chrome.storage.local.set({ popupWindowId: null });
-            });
-        } else {
-            chrome.windows.getCurrent((currentWindow) => {
-                chrome.windows.create({
-                    url: chrome.runtime.getURL('popup.html'),
-                    type: 'popup',
-                    width: 360,
-                    height: 580,
-                    left: currentWindow.width - 400,
-                    top: 50
-                }, (newWindow) => {
-                    chrome.storage.local.set({ popupWindowId: newWindow.id });
-                });
-            });
-        }
-    })
-});
-
-// 监听窗口关闭
-chrome.windows.onRemoved.addListener((closedWindowId) => {
-    chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
-        if (closedWindowId === popupWindowId) {
-            chrome.storage.local.set({ popupWindowId: null });
-        }
-    })
-    chrome.alarms.clear('refreshTimer');
-});

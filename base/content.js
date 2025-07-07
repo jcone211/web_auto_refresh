@@ -14,27 +14,31 @@ function captureDocument() {
                 }
             });
         }
-    }, 500);
+    }, 1000);
 }
 
 // 监听页面完全加载事件
 window.addEventListener('load', () => {
     // 额外延迟1秒确保所有资源加载完成
-    setTimeout(captureDocument, 1000);
+    setTimeout(captureDocument, 2000);
 });
 
 // 监听网络空闲事件(如果可用)
-if (window.requestIdleCallback) {
-    window.requestIdleCallback(captureDocument, { timeout: 2000 });
-} else {
-    // 备用方案：延迟2秒捕获
-    setTimeout(captureDocument, 2000);
-}
+// if (window.requestIdleCallback) {
+//     console.error(22222222222);
 
-// 监听history变化(单页应用)
+//     window.requestIdleCallback(captureDocument, { timeout: 2000 });
+// } else {
+//     console.error(33333333333333);
+
+//     // 备用方案：延迟2秒捕获
+//     setTimeout(captureDocument, 2000);
+// }
+
+// 监听history变化(单页应用伪更新)
 const handleSPANavigation = () => {
     // SPA导航后延迟1秒捕获
-    setTimeout(captureDocument, 1000);
+    setTimeout(captureDocument, 2000);
 };
 
 window.addEventListener('popstate', handleSPANavigation);

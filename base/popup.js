@@ -4,6 +4,7 @@ let capturedDocuments = {};
 let selectorName = '';
 //监听的旧数据，根据是否变更来判断是否有更新
 let targetOldData = '';
+let targetUrl = '';
 
 const urlInput = document.getElementById('url');
 const intervalInput = document.getElementById('interval');
@@ -21,6 +22,7 @@ chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
         urlInput.value = response.targetUrl || '';
         intervalInput.value = response.refreshInterval || 60;
         selectorEl.value = response.selectorName || '';
+        targetUrl = response.targetUrl || '';
         updateStatus(false);
     }
 });
@@ -48,6 +50,7 @@ startBtn.addEventListener('click', () => {
         selectorName: selectorName
     }, (response) => {
         if (response && response.status === 'started') {
+            targetUrl = url;
             updateStatus(true);
         }
     });
@@ -86,6 +89,11 @@ chrome.runtime.onMessage.addListener((message) => {
         refreshCount = 1;
         refreshCountEl.textContent = `已刷新次数：${refreshCount}`;
     } else if (message.type === 'DOCUMENT_CAPTURED') {
+        const messageUrl = message.documentData.url;
+        console.error("url", messageUrl);
+        if (messageUrl !== targetUrl) {
+            return;
+        }
         // 存储捕获的document数据
         capturedDocuments[message.documentData.url] = message.documentData;
 
