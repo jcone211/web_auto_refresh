@@ -90,7 +90,6 @@ chrome.runtime.onMessage.addListener((message) => {
         refreshCountEl.textContent = `已刷新次数：${refreshCount}`;
     } else if (message.type === 'DOCUMENT_CAPTURED') {
         const messageUrl = message.documentData.url;
-        console.error("url", messageUrl);
         if (messageUrl !== targetUrl) {
             return;
         }
