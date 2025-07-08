@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>网页定时刷新器</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="form-group container">
+        <div>
+            <label for="selectorName"><span>选择器名称&nbsp;<span class="warn">*</span></span></label>
+            <input type="text" class="small-input" id="selectorName">
+        </div>
+        <div>
+            <label for="interval">刷新间隔(秒)&nbsp;<span class="warn">*</span></label>
+            <input type="number" class="small-input" id="interval" min="30" value="60">
+        </div>
+    </div>
+    <div class="form-group">
+        <div class="container">
+            <label for="url">股票列表</label>
+            <div class="container">
+                <div class="btn-container">
+                    <button id="startBtn">开始</button>
+                    <button id="stopBtn" disabled>停止</button>
+                </div>
+                <div class="create-link" id="addStock">+</div>
+            </div>
+        </div>
+        <div class="stock-table-container">
+            <table class="stock-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>开盘价</th>
+                        <th>现价</th>
+                        <th>涨跌幅</th>
+                        <th>目标</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <!-- 股票列表数据显示区域 -->
+                <tbody id="stockTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 添加编辑股票div -->
+    <div class="overlay">
+        <div id="stockModel" class="stock-model">
+            <div class="close-btn">x</div>
+            <div>
+                <div class="last-monitor" id="lastMonitor">
+                    <div class="stock-data" style="margin-bottom: 6px;">
+                        <span>开盘价</span>
+                        <span>现价</span>
+                        <span>涨跌幅</span>
+                        <span>目标价</span>
+                    </div>
+                    <div class="stock-data">
+                        <span id="startPrice">-</span>
+                        <span id="currentPrice">-</span>
+                        <span id="percent">-</span>
+                        <span id="targetPrice">-</span>
+                    </div>
+                </div>
+                <form>
+                    <label for="stockUrl">网址&nbsp;<span class="warn">*</span></label>
+                    <input type="text" id="stockUrl" placeholder="网址">
+                    <div class="container" style="gap: 4px;">
+                        <div>
+                            <label for="stockName">名称</label>
+                            <input type="text" id="stockName" placeholder="股票名称">
+                        </div>
+                        <div>
+                            <label for="targetPrice">目标涨跌幅</label>
+                            <input type="number" id="targetPercent" placeholder="目标涨跌幅(%)">
+                        </div>
+                    </div>
+                    <div class="container" id="addOrDelDiv">
+                        <div class="input-div" id="addDiv">
+                            <input type="button" id="saveStock" class="save-input btn-embossed" value="保存">
+                        </div>
+                        <div class="input-div" id="delDiv">
+                            <input type="button" id="delStock" class="save-input del-embossed" value="删除">
+                        </div>
+                    </div>
+
+                </form>
+            </div>
+        </div>
+
+        <script type="module" src="./popup.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "同花顺问财",
+  "version": "1.0",
+  "description": "同花顺问财数据监听",
+  "permissions": [
+    "storage",
+    "windows",
+    "alarms",
+    "idle",
+    "notifications",
+    "tabs"
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon.png",
+      "48": "icons/icon.png",
+      "128": "icons/icon.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon.png",
+    "48": "icons/icon.png",
+    "128": "icons/icon.png"
+  }
+}
