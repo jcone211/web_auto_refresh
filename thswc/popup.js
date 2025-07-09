@@ -1,3 +1,5 @@
+import { getDateTime } from "./utils.js";
+
 let selectorName = '';
 let stockList = [
     {
@@ -8,6 +10,7 @@ let stockList = [
         percent: 0.08,  //涨跌幅
         targetPercent: -3.0,  //目标涨跌幅
         targetPrice: 1368.39, //目标价格
+        stopRunning: true,  //是否停止运行
     },
     {
         url: "https://www.iwencai.com/unifiedwap/result?tid=stockpick&qs=box_main_ths&w=%E4%B8%8A%E6%B5%B7%E7%89%A9%E8%B4%B8",
@@ -17,6 +20,7 @@ let stockList = [
         percent: 0.20,
         targetPercent: -1.0,
         targetPrice: 9.68,
+        stopRunning: true,  //是否运行
     },
     {
         url: "https://www.iwencai.com/unifiedwap/result?w=%E4%B8%9C%E6%96%B9%E9%9B%A8%E8%99%B9&querytype=stock",
@@ -26,6 +30,7 @@ let stockList = [
         percent: -0.18,
         targetPercent: -1.0,
         targetPrice: 11.09,
+        stopRunning: true,  //是否运行
     },
 ]
 let urls = [];
@@ -40,6 +45,7 @@ const selectorsEnum = {
     }
 }
 
+const lastUpdateTimeEl = document.getElementById('lastUpdateTime');
 const intervalInput = document.getElementById('interval');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
@@ -146,6 +152,7 @@ saveStockBtnEl.addEventListener('click', () => {
     chrome.storage.sync.set({ stockList }, () => {
         renderStockList();
         closeModal();
+        chrome.runtime.sendMessage({ action: 'refresh' });
     });
 });
 
@@ -161,6 +168,7 @@ delStockBtnEl.addEventListener('click', () => {
             chrome.storage.sync.set({ stockList }, () => {
                 renderStockList();
                 closeModal();
+                chrome.runtime.sendMessage({ action: 'refresh' });
             });
         }
     })
@@ -199,7 +207,7 @@ chrome.runtime.onMessage.addListener((message) => {
                         percent = parseFloat(percent);
                     }
                     const kpj = (dqj - zdf).toFixed(2);
-                    if (kpj) {
+                    if (kpj && kpj !== 'NaN') {
                         stock.startPrice = kpj;
                     }
                     if (dqj) {
@@ -214,6 +222,7 @@ chrome.runtime.onMessage.addListener((message) => {
                     } else if (stock.targetPercent < 0 && percent < stock.targetPercent) {
                         createChromeNotification(stock);
                     }
+                    lastUpdateTimeEl.textContent = getDateTime();
                     // console.error('name', stock.name, 'startPrice', stock.startPrice, 'currentPrice', stock.currentPrice, 'percent', stock.percent);
                     chrome.storage.sync.set({ stockList }, (data) => {
                         renderStockList();
@@ -272,19 +281,34 @@ function renderStock(stockIndex) {
         <td>${stock.targetPercent ? stock.targetPercent + '%' : '-'}</td>`;
 
     const td = document.createElement('td');
-    const img = document.createElement('img');
-    img.src = "./icons/edit.svg";
-    img.className = "edit";
-    img.setAttribute('data-id', stockIndex);
+    const div = document.createElement('div');
+    const editImg = document.createElement('img');
+    editImg.src = "./icons/edit.svg";
+    editImg.className = "edit";
+    editImg.setAttribute('data-id', stockIndex);
     // 给编辑按钮绑定点击事件
-    img.addEventListener('click', () => {
+    editImg.addEventListener('click', () => {
         overlayEl.style.display = "flex";
         editUrl = stock.url;
         // 填充表单数据
         renderEditForm(stock);
         document.getElementById('stockUrl').disabled = true;
     });
-    td.appendChild(img);
+    const stopImg = document.createElement('img');
+    stopImg.src = stock.stopRunning ? "./icons/stop.svg" : "./icons/select.svg";
+    stopImg.className = "edit";
+    stopImg.style.marginLeft = "5px";
+    stopImg.setAttribute('data-id', stockIndex);
+    stopImg.addEventListener('click', () => {
+        stock.stopRunning = !stock.stopRunning;
+        chrome.storage.sync.set({ stockList }, (data) => {
+            renderStockList();
+            chrome.runtime.sendMessage({ action: 'refresh' });
+        });
+    });
+    div.appendChild(editImg);
+    div.appendChild(stopImg);
+    td.appendChild(div);
     tr.appendChild(td);
     return tr;
 }

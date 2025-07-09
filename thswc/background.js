@@ -4,6 +4,8 @@ let selectorName = '';
 let stockList = [];
 let targetUrls = [];
 
+init();
+
 chrome.action.onClicked.addListener(() => {
     chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
         if (popupWindowId !== null && popupWindowId !== undefined) {
@@ -16,7 +18,7 @@ chrome.action.onClicked.addListener(() => {
                     url: chrome.runtime.getURL('popup.html'),
                     type: 'popup',
                     width: 600,
-                    height: 500,
+                    height: 400 + (stockList.length - 2) * 44,
                     left: currentWindow.width - 400,
                     top: 50
                 }, (newWindow) => {
@@ -49,12 +51,10 @@ function init() {
         }
         if (result.stockList) {
             stockList = result.stockList;
-            targetUrls = stockList ? stockList.map(item => item.url) : [];
+            targetUrls = stockList ? stockList.filter(item => !item.stopRunning).map(item => item.url) : [];
         }
     });
 }
-
-init();
 
 // 监听消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -66,6 +66,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ status: 'stopped' });
     } else if (request.action === 'getStatus') {
         sendResponse({ refreshInterval, selectorName, stockList });
+    } else if (request.action === 'refresh') {
+        init();
     }
 });
 

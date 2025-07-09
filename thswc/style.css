@@ -4,6 +4,12 @@ body {
   font-family: Arial, sans-serif;
 }
 
+.last-update-time {
+  margin-top: 10px;
+  float: right;
+  font-size: 14px;
+}
+
 .form-group {
   margin-bottom: 30px;
 }

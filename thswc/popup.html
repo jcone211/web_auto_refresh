@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>网页定时刷新器</title>
+    <title>同花顺问财</title>
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -16,6 +16,10 @@
         <div>
             <label for="interval">刷新间隔(秒)&nbsp;<span class="warn">*</span></label>
             <input type="number" class="small-input" id="interval" min="30" value="60">
+        </div>
+        <div>
+            <div>上次更新时间</div>
+            <div id="lastUpdateTime" class="last-update-time">-</div>
         </div>
     </div>
     <div class="form-group">
