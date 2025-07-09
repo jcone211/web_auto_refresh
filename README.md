@@ -58,4 +58,4 @@ web_auto_refresh/
 
 演示：
 
-![alt text](images/README/image.png)
+![alt text](images/README/image1.png)
