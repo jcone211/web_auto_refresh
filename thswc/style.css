@@ -4,6 +4,33 @@ body {
   font-family: Arial, sans-serif;
 }
 
+.quick-open {
+  display: flex;
+  margin-bottom: 14px;
+  align-items: center;
+  position: relative;
+}
+
+.quick-open span {
+  width: 10%;
+  display: block;
+  font-weight: bold;
+}
+
+.quick-open textarea {
+  width: 60%;
+}
+
+.quick-open textarea::placeholder {
+  color: #888888a5;
+}
+
+.quick-open > div {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
 .last-update-time {
   margin-top: 10px;
   float: right;
@@ -11,7 +38,7 @@ body {
 }
 
 .form-group {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
 }
 
 .container {

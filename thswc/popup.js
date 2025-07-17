@@ -45,6 +45,7 @@ const selectorsEnum = {
     }
 }
 
+const quickOpenEl = document.getElementById('quickOpen');
 const lastUpdateTimeEl = document.getElementById('lastUpdateTime');
 const intervalInput = document.getElementById('interval');
 const startBtn = document.getElementById('startBtn');
@@ -78,6 +79,18 @@ chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
         urls = stockList.map(item => item.url);
         updateStatus(false);
         renderStockList()
+    }
+});
+
+// 快速打开文本框
+quickOpenEl.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && quickOpenEl.value) {
+        event.preventDefault();
+        const names = quickOpenEl.value.split(/[\s,，、；;|\/]+/).filter(Boolean);
+        names.forEach((item) => {
+            const url = `https://www.iwencai.com/unifiedwap/result?w=${item}&querytype=stock`;
+            chrome.tabs.create({ url: url });
+        })
     }
 });
 

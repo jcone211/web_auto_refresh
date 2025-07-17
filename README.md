@@ -52,7 +52,7 @@ web_auto_refresh/
 
 2、填写刷新间隔：30
 
-3、+按钮添加股票，仅需填写可正常访问的网页地址
+3、+按钮添加股票，仅需填写可正常访问的网页地址（例:https://www.iwencai.com/unifiedwap/result?w=002765&querytype=stock）
 
 4、点击按钮“开始”
 

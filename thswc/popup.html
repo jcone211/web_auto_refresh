@@ -8,6 +8,14 @@
 </head>
 
 <body>
+    <div class="quick-open">
+        <span>快速打开</span>
+        <textarea id="quickOpen" rows="2" placeholder="输入股票名称，Enter打开全部网页(任意字符分隔)"></textarea>
+        <div>
+            <div>上次更新时间</div>
+            <div id="lastUpdateTime" class="last-update-time">-</div>
+        </div>
+    </div>
     <div class="form-group container">
         <div>
             <label for="selectorName"><span>选择器名称&nbsp;<span class="warn">*</span></span></label>
@@ -17,14 +25,11 @@
             <label for="interval">刷新间隔(秒)&nbsp;<span class="warn">*</span></label>
             <input type="number" class="small-input" id="interval" min="30" value="60">
         </div>
-        <div>
-            <div>上次更新时间</div>
-            <div id="lastUpdateTime" class="last-update-time">-</div>
-        </div>
+
     </div>
     <div class="form-group">
         <div class="container">
-            <label for="url">股票列表</label>
+            <h3>股票列表</h3>
             <div class="container">
                 <div class="btn-container">
                     <button id="startBtn">开始</button>
