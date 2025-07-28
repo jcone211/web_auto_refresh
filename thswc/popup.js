@@ -231,12 +231,12 @@ chrome.runtime.onMessage.addListener((message) => {
                     }
                     if (percent) {
                         stock.percent = percent;
-                    }
-                    //发送价格监控通知
-                    if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
-                        createChromeNotification(stock);
-                    } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
-                        createChromeNotification(stock);
+                        //发送价格监控通知
+                        if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
+                            createChromeNotification(stock);
+                        } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
+                            createChromeNotification(stock);
+                        }
                     }
                     lastUpdateTimeEl.textContent = getDateTime();
                     // console.error('name', stock.name, 'startPrice', stock.startPrice, 'currentPrice', stock.currentPrice, 'percent', stock.percent);
