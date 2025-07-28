@@ -78,14 +78,17 @@
                 <form>
                     <label for="stockUrl">网址&nbsp;<span class="warn">*</span></label>
                     <input type="text" id="stockUrl" placeholder="网址">
-                    <div class="container" style="gap: 4px;">
+                    <div class="container-split">
                         <div>
                             <label for="stockName">名称</label>
                             <input type="text" id="stockName" placeholder="股票名称">
                         </div>
                         <div>
-                            <label for="targetPrice">目标涨跌幅</label>
-                            <input type="number" id="targetPercent" placeholder="目标涨跌幅(%)">
+                            <label>目标涨跌幅(%)</label>
+                            <div class="target-percent-div">
+                                &le;<input type="number" id="targetPercentLe">
+                                &ge;<input type="number" id="targetPercentGe">
+                            </div>
                         </div>
                     </div>
                     <div class="container" id="addOrDelDiv">

@@ -46,6 +46,15 @@ body {
   justify-content: space-between;
 }
 
+.container-split {
+  display: flex;
+  gap: 20px;
+}
+
+.container-split > div {
+  width: 50%;
+}
+
 .stock-data {
   display: grid;
   grid-template-columns: repeat(4, 1fr); /* 四列等宽 */
@@ -164,6 +173,18 @@ button:disabled {
 
 .stock-model form input {
   margin-bottom: 5px;
+}
+
+.target-percent-div {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: large;
+}
+
+.target-percent-div input {
+  width: 80px;
 }
 
 .last-monitor {

@@ -8,8 +8,9 @@ let stockList = [
         startPrice: 1410.71,  //开盘价
         currentPrice: 1411.70,    //现价
         percent: 0.08,  //涨跌幅
-        targetPercent: -3.0,  //目标涨跌幅
-        targetPrice: 1368.39, //目标价格
+        targetPercentLe: -3.0,  //目标涨跌幅，小于等于
+        targetPercentGe: 2.0,  //目标涨跌幅，大于等于
+        targetPrice: "≤1368.39 ≥1400", //目标价格
         stopRunning: true,  //是否停止运行
     },
     {
@@ -18,8 +19,9 @@ let stockList = [
         startPrice: 9.78,
         currentPrice: 9.94,
         percent: 0.20,
-        targetPercent: -1.0,
-        targetPrice: 9.68,
+        targetPercentLe: -1.0,
+        targetPercentGe: 1.0,
+        targetPrice: "≤9.68 ≥9.88",
         stopRunning: true,  //是否运行
     },
     {
@@ -28,8 +30,9 @@ let stockList = [
         startPrice: 11.20,
         currentPrice: 11.19,
         percent: -0.18,
-        targetPercent: -1.0,
-        targetPrice: 11.09,
+        targetPercentLe: -1.0,
+        targetPercentGe: -0.01,
+        targetPrice: "≤11.08 ≥11.20",
         stopRunning: true,  //是否运行
     },
 ]
@@ -154,12 +157,14 @@ saveStockBtnEl.addEventListener('click', () => {
         }
         const item = list[0];
         item.name = document.getElementById('stockName').value;
-        item.targetPercent = document.getElementById('targetPercent').value;
+        item.targetPercentLe = document.getElementById('targetPercentLe').value;
+        item.targetPercentGe = document.getElementById('targetPercentGe').value;
     } else {
         stockList.push({
             url: url,
             name: document.getElementById('stockName').value,
-            targetPercent: document.getElementById('targetPercent').value,
+            targetPercentLe: document.getElementById('targetPercentLe').value,
+            targetPercentGe: document.getElementById('targetPercentGe').value,
         });
     }
     chrome.storage.sync.set({ stockList }, () => {
@@ -205,12 +210,10 @@ chrome.runtime.onMessage.addListener((message) => {
             if (selectorsEnum[selectorName] !== undefined) {
                 const selector = selectorsEnum[selectorName];
                 if (selectorName === 'wc1') {
-                    if (!stock.name) {
-                        let name = getTargetData(doc, selector.name);
-                        if (name) {
-                            name = name.replace(/\s*\(.*?\)/, '');
-                            stock.name = name;
-                        }
+                    let name = getTargetData(doc, selector.name);
+                    if (name) {
+                        name = name.replace(/\s*\(.*?\)/, '');
+                        stock.name = name;
                     }
                     let dqj = parseFloat(getTargetData(doc, selector.dqj));
                     let zdf = parseFloat(getTargetData(doc, selector.zdf));
@@ -230,9 +233,9 @@ chrome.runtime.onMessage.addListener((message) => {
                         stock.percent = percent;
                     }
                     //发送价格监控通知
-                    if (stock.targetPercent > 0 && percent > stock.targetPercent) {
+                    if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
                         createChromeNotification(stock);
-                    } else if (stock.targetPercent < 0 && percent < stock.targetPercent) {
+                    } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
                         createChromeNotification(stock);
                     }
                     lastUpdateTimeEl.textContent = getDateTime();
@@ -291,7 +294,7 @@ function renderStock(stockIndex) {
         <td>${stock.startPrice ? stock.startPrice : '-'}</td>
         <td>${stock.startPrice && stock.currentPrice ? '<text class="' + (stock.startPrice > stock.currentPrice ? 'fall">' : 'rise">') + stock.currentPrice + '</text>' : '-'}</td>
         <td>${stock.percent ? stock.percent + '%' : '-'}</td>
-        <td>${stock.targetPercent ? stock.targetPercent + '%' : '-'}</td>`;
+        <td>${getTargetPercentStr(stock.targetPercentLe, stock.targetPercentGe)}</td>`;
 
     const td = document.createElement('td');
     const div = document.createElement('div');
@@ -324,6 +327,21 @@ function renderStock(stockIndex) {
     td.appendChild(div);
     tr.appendChild(td);
     return tr;
+}
+
+function getTargetPercentStr(targetPercentLe, targetPercentGe) {
+    if (!targetPercentLe && !targetPercentGe) {
+        return "-";
+    }
+    if (targetPercentLe && targetPercentGe) {
+        return `≤${targetPercentLe}% ≥${targetPercentGe}%`;
+    }
+    if (targetPercentLe) {
+        return `≤${targetPercentLe}%`;
+    }
+    if (targetPercentGe) {
+        return `≥${targetPercentGe}%`;
+    }
 }
 
 // 更新开始/停止UI状态
@@ -360,9 +378,16 @@ function renderEditForm(stock) {
         document.getElementById('currentPrice').textContent = '-';
     }
     document.getElementById('percent').textContent = stock.percent ? (stock.percent + '%') : '-';
-    document.getElementById('targetPercent').value = stock.targetPercent ? stock.targetPercent : null;
-    if (stock.startPrice && stock.targetPercent) {
-        const targetPrice = (stock.startPrice * (1 + stock.targetPercent / 100)).toFixed(2);
+    document.getElementById('targetPercentLe').value = stock.targetPercentLe ? stock.targetPercentLe : null;
+    document.getElementById('targetPercentGe').value = stock.targetPercentGe ? stock.targetPercentGe : null;
+    if (stock.startPrice && (stock.targetPercentLe || stock.targetPercentGe)) {
+        let targetPrice = "";
+        if (stock.targetPercentLe) {
+            targetPrice = "≤" + (stock.startPrice * (1 + stock.targetPercentLe / 100)).toFixed(2);
+        }
+        if (stock.targetPercentGe) {
+            targetPrice = targetPrice + " ≥" + (stock.startPrice * (1 + stock.targetPercentGe / 100)).toFixed(2);
+        }
         document.getElementById('targetPrice').textContent = targetPrice;
     } else {
         document.getElementById('targetPrice').textContent = '-';
@@ -372,7 +397,8 @@ function renderEditForm(stock) {
 function clearEditForm() {
     document.getElementById('stockUrl').value = '';
     document.getElementById('stockName').value = '';
-    document.getElementById('targetPercent').value = null;
+    document.getElementById('targetPercentLe').value = null;
+    document.getElementById('targetPercentGe').value = null;
 }
 
 // 关闭弹窗
