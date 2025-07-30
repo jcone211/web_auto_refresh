@@ -18,7 +18,7 @@ chrome.action.onClicked.addListener(() => {
                     url: chrome.runtime.getURL('popup.html'),
                     type: 'popup',
                     width: 600,
-                    height: 436 + (stockList.length - 2) * 44,
+                    height: 436 + (stockList.length - 2) * 45,
                     left: currentWindow.width - 400,
                     top: 50
                 }, (newWindow) => {
