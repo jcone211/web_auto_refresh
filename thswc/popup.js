@@ -1,6 +1,8 @@
 import { getDateTime } from "./utils.js";
+import { Mutex } from "./utils.js";
 
 let selectorName = '';
+const mutex = new Mutex();
 let stockList = [
     {
         url: "https://www.iwencai.com/unifiedwap/result?w=%E8%8C%85%E5%8F%B0",
@@ -193,61 +195,73 @@ delStockBtnEl.addEventListener('click', () => {
 });
 
 // 接收并处理页面刷新后的数据
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener(async (message) => {
     if (message.type === 'DOCUMENT_CAPTURED') {
-        const messageUrl = message.documentData.url;
-        const index = urls.findIndex(item => item === messageUrl);
-        if (index === -1) {
-            return;
-        }
-        const stock = stockList[index];
-        // 将HTML字符串转换为DOM
-        // console.error(JSON.stringify(message.documentData.html));
-        const parser = new DOMParser();
-
-        if (message.documentData.html) {
-            const doc = parser.parseFromString(message.documentData.html, 'text/html');
-            if (selectorsEnum[selectorName] !== undefined) {
-                const selector = selectorsEnum[selectorName];
-                if (selectorName === 'wc1') {
-                    let name = getTargetData(doc, selector.name);
-                    if (name) {
-                        name = name.replace(/\s*\(.*?\)/, '');
-                        stock.name = name;
-                    }
-                    let dqj = parseFloat(getTargetData(doc, selector.dqj));
-                    let zdf = parseFloat(getTargetData(doc, selector.zdf));
-                    let percent = getTargetData(doc, selector.percent);
-                    if (percent) {
-                        percent = percent.replace('%', '').replace('/', '');
-                        percent = parseFloat(percent);
-                    }
-                    const kpj = (dqj - zdf).toFixed(2);
-                    if (kpj && kpj !== 'NaN') {
-                        stock.startPrice = kpj;
-                    }
-                    if (dqj) {
-                        stock.currentPrice = dqj;
-                    }
-                    if (percent) {
-                        stock.percent = percent;
-                        //发送价格监控通知
-                        if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
-                            createChromeNotification(stock);
-                        } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
-                            createChromeNotification(stock);
-                        }
-                    }
-                    lastUpdateTimeEl.textContent = getDateTime();
-                    // console.error('name', stock.name, 'startPrice', stock.startPrice, 'currentPrice', stock.currentPrice, 'percent', stock.percent);
-                    chrome.storage.sync.set({ stockList }, (data) => {
-                        renderStockList();
-                    });
-                }
-            } else {
-                getTargetData(doc, selectorName);
+        await mutex.lock();
+        try {
+            const messageUrl = message.documentData.url;
+            const index = urls.findIndex(item => item === messageUrl);
+            if (index === -1) {
+                return;
             }
+            const stock = stockList[index];
+            // 将HTML字符串转换为DOM
+            // console.error(JSON.stringify(message.documentData.html));
+            const parser = new DOMParser();
+
+            if (message.documentData.html) {
+                const doc = parser.parseFromString(message.documentData.html, 'text/html');
+                if (selectorsEnum[selectorName] !== undefined) {
+                    const selector = selectorsEnum[selectorName];
+                    if (selectorName === 'wc1') {
+                        let name = getTargetData(doc, selector.name);
+                        if (name) {
+                            name = name.replace(/\s*\(.*?\)/, '');
+                            stock.name = name;
+                            // console.error("加载", name);
+
+                        } else {
+                            console.error("名称为null，当前价为", parseFloat(getTargetData(doc, selector.dqj)), messageUrl);
+                        }
+                        let dqj = parseFloat(getTargetData(doc, selector.dqj));
+                        let zdf = parseFloat(getTargetData(doc, selector.zdf));
+                        let percent = getTargetData(doc, selector.percent);
+                        if (percent) {
+                            percent = percent.replace('%', '').replace('/', '');
+                            percent = parseFloat(percent);
+                        }
+                        const kpj = (dqj - zdf).toFixed(2);
+                        if (kpj && kpj !== 'NaN') {
+                            stock.startPrice = kpj;
+                        }
+                        if (dqj) {
+                            stock.currentPrice = dqj;
+                        }
+                        if (percent) {
+                            stock.percent = percent;
+                            //发送价格监控通知
+                            if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
+                                createChromeNotification(stock);
+                            } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
+                                createChromeNotification(stock);
+                            }
+                        }
+                        lastUpdateTimeEl.textContent = getDateTime();
+                        // console.error('name', stock.name, 'startPrice', stock.startPrice, 'currentPrice', stock.currentPrice, 'percent', stock.percent);
+                        chrome.storage.sync.set({ stockList }, (data) => {
+                            renderStockList();
+                        });
+                    }
+                } else {
+                    getTargetData(doc, selectorName);
+                }
+            }
+        } catch (err) {
+            alert('出现错误，请关闭后重新打开');
+        } finally {
+            mutex.unlock();
         }
+        return true;
     }
 });
 

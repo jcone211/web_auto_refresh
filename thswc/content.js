@@ -1,45 +1,52 @@
-// 监听页面加载事件
-function captureDocument() {
-    // 延迟500ms确保动态内容加载完成
-    setTimeout(() => {
-        // 检查页面是否完全加载
-        if (document.readyState === 'complete') {
-            chrome.runtime.sendMessage({
-                type: 'DOCUMENT_CAPTURED',
-                documentData: {
-                    title: document.title,
-                    url: window.location.href,
-                    html: document.documentElement.outerHTML,
-                    timestamp: Date.now()
-                }
-            });
-        }
-    }, 1000);
+let debounceTimer;
+// let timer = 0;
+// chrome.storage.local.get('localTimer', (result) => {
+//     if (!('localTimer' in result)) {
+//         chrome.storage.local.set({ localTimer: 0 });
+//         timer = 0;
+//     } else {
+//         timer = result.localTimer;
+//     }
+// });
+
+//校验+防抖
+function captureVerify() {
+    if (document.querySelector('.wencai-logo-link') && document.querySelector('.code-name')) {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            captureDocument();
+        }, 500);
+    }
 }
 
-// 监听页面完全加载事件
-window.addEventListener('load', () => {
-    // 额外延迟1秒确保所有资源加载完成
-    setTimeout(captureDocument, 2000);
-});
+function captureDocument() {
+    if (!chrome.runtime || !chrome.runtime.sendMessage) return;
+    // console.error("发送消息次数", timer);
+    // chrome.storage.local.set({ 'localTimer': ++timer });
+    chrome.runtime.sendMessage({
+        type: 'DOCUMENT_CAPTURED',
+        documentData: {
+            title: document.title,
+            url: window.location.href,
+            html: document.documentElement.outerHTML,
+            timestamp: Date.now()
+        }
+    });
+}
 
-// // 监听网络空闲事件(如果可用)
-// if (window.requestIdleCallback) {
-//     window.requestIdleCallback(captureDocument, { timeout: 2000 });
+// 初始抓取
+// if (document.readyState === 'complete') {
+//     captureDocument();
 // } else {
-//     // 备用方案：延迟2秒捕获
-//     setTimeout(captureDocument, 2000);
+//     window.addEventListener('load', captureDocument);
 // }
 
-// 监听history变化(单页应用)
-const handleSPANavigation = () => {
-    // SPA导航后延迟1秒捕获
-    setTimeout(captureDocument, 2000);
-};
-
-window.addEventListener('popstate', handleSPANavigation);
-window.addEventListener('pushstate', handleSPANavigation);
-window.addEventListener('replacestate', handleSPANavigation);
-
-// 初始捕获
-captureDocument();
+// 监听动态新增元素
+const observer = new MutationObserver((mutationsList) => {
+    for (const mutation of mutationsList) {
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            captureVerify();
+        }
+    }
+});
+observer.observe(document.body, { childList: true, subtree: true });
