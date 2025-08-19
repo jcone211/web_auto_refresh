@@ -11,11 +11,13 @@ let debounceTimer;
 
 //校验+防抖
 function captureVerify() {
-    if (document.querySelector('.wencai-logo-link') && document.querySelector('.code-name')) {
+    if (document.readyState === 'complete' &&
+        document.querySelector('.wencai-logo-link') &&
+        document.querySelector('.code-name')) {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
             captureDocument();
-        }, 500);
+        }, 1000); // 增加延迟确保页面完全加载
     }
 }
 
@@ -50,3 +52,7 @@ const observer = new MutationObserver((mutationsList) => {
     }
 });
 observer.observe(document.body, { childList: true, subtree: true });
+
+window.addEventListener('beforeunload', () => {
+    observer.disconnect();
+});

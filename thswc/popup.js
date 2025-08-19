@@ -219,9 +219,9 @@ chrome.runtime.onMessage.addListener(async (message) => {
                             name = name.replace(/\s*\(.*?\)/, '');
                             stock.name = name;
                             // console.error("加载", name);
-
                         } else {
                             console.error("名称为null，当前价为", parseFloat(getTargetData(doc, selector.dqj)), messageUrl);
+                            return false;
                         }
                         let dqj = parseFloat(getTargetData(doc, selector.dqj));
                         let zdf = parseFloat(getTargetData(doc, selector.zdf));
@@ -252,12 +252,11 @@ chrome.runtime.onMessage.addListener(async (message) => {
                             renderStockList();
                         });
                     }
-                } else {
-                    getTargetData(doc, selectorName);
                 }
             }
         } catch (err) {
-            alert('出现错误，请关闭后重新打开');
+            console.error('数据更新错误:', err);
+            lastUpdateTimeEl.textContent = '数据更新失败 ' + getDateTime();
         } finally {
             mutex.unlock();
         }
