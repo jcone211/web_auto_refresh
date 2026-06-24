@@ -157,7 +157,9 @@ chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
 quickOpenEl.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && quickOpenEl.value) {
         event.preventDefault();
-        const names = quickOpenEl.value.split(/[\s,，、；;|\/]+/).filter(Boolean);
+        const names = quickOpenEl.value
+            .split(/[\s,，、；;|\/]+/)
+            .filter(item => item && !/^-+$/.test(item));
         names.forEach((item) => {
             const url = `https://www.iwencai.com/unifiedwap/result?w=${item}&querytype=stock`;
             chrome.tabs.create({ url: url });
