@@ -20,6 +20,10 @@
             justify-content: space-between;
         }
 
+        .container-item-gap {
+            gap: 10px;
+        }
+
         label {
             display: block;
             margin-bottom: 5px;
@@ -70,9 +74,15 @@
         <label for="selectorName">选择器名称(若为id选择器在最前方加#，若为class选择器则使用.开头，例如#exm或.exm1.exm2)：</label>
         <input type="text" id="selectorName">
     </div>
-    <div class="form-group">
-        <label for="interval">刷新间隔(30秒及以上):</label>
-        <input type="number" id="interval" min="30" value="60">
+    <div class="container container-item-gap">
+        <div class="form-group">
+            <label for="witchItem">第几项(可跳过置顶动态):</label>
+            <input type="number" id="witchItem" min="1" value="1">
+        </div>
+        <div class="form-group" style="width: 40%;">
+            <label for="interval">刷新间隔s(30+):</label>
+            <input type="number" id="interval" min="30" value="60">
+        </div>
     </div>
     <button id="startBtn">开始刷新</button>
     <button id="stopBtn" disabled>停止刷新</button>

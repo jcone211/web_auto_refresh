@@ -8,6 +8,7 @@ let targetUrl = '';
 
 const urlInput = document.getElementById('url');
 const intervalInput = document.getElementById('interval');
+const witchItemInput = document.getElementById('witchItem');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const statusDiv = document.getElementById('status');
@@ -21,6 +22,8 @@ chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
     if (response) {
         urlInput.value = response.targetUrl || '';
         intervalInput.value = response.refreshInterval || 60;
+        console.log(response);
+        witchItemInput.value = response.witchItemInput || 1;
         selectorEl.value = response.selectorName || '';
         targetUrl = response.targetUrl || '';
         updateStatus(false);
@@ -107,7 +110,7 @@ chrome.runtime.onMessage.addListener((message) => {
                 if (selectorName.startsWith("#")) {
                     targetData = doc.getElementsById(selectorName.substring(1));
                 } else {
-                    targetData = doc.querySelector(selectorName);
+                    targetData = doc.querySelectorAll(selectorName)[witchItemInput.value - 1];
                 }
                 monitorDataEl.textContent = `监听数据：${targetData?.textContent ? targetData.textContent : '未找到，请重新填写选择器'}`;
                 // 检查是否有变化

@@ -2,27 +2,42 @@
 let refreshInterval = 30; // 默认30秒
 let targetUrl = 'https://github.com/';
 let selectorName = '';
+let witchItemInput = 1;
 
 chrome.action.onClicked.addListener(() => {
     chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
-        if (popupWindowId !== null && popupWindowId !== undefined) {
-            chrome.windows.remove(popupWindowId, () => {
-                chrome.storage.local.set({ popupWindowId: null });
+        // 全局唯一弹窗
+        // if (popupWindowId !== null && popupWindowId !== undefined) {
+        //     chrome.windows.remove(popupWindowId, () => {
+        //         chrome.storage.local.set({ popupWindowId: null });
+        //     });
+        // } else {
+        //     chrome.windows.getCurrent((currentWindow) => {
+        //         chrome.windows.create({
+        //             url: chrome.runtime.getURL('popup.html'),
+        //             type: 'popup',
+        //             width: 360,
+        //             height: 570,
+        //             left: currentWindow.width - 400,
+        //             top: 50
+        //         }, (newWindow) => {
+        //             chrome.storage.local.set({ popupWindowId: newWindow.id });
+        //         });
+        //     });
+        // }
+        // 无限弹窗
+        chrome.windows.getCurrent((currentWindow) => {
+            chrome.windows.create({
+                url: chrome.runtime.getURL('popup.html'),
+                type: 'popup',
+                width: 360,
+                height: 570,
+                left: currentWindow.width - 400,
+                top: 50
+            }, (newWindow) => {
+                chrome.storage.local.set({ popupWindowId: newWindow.id });
             });
-        } else {
-            chrome.windows.getCurrent((currentWindow) => {
-                chrome.windows.create({
-                    url: chrome.runtime.getURL('popup.html'),
-                    type: 'popup',
-                    width: 360,
-                    height: 580,
-                    left: currentWindow.width - 400,
-                    top: 50
-                }, (newWindow) => {
-                    chrome.storage.local.set({ popupWindowId: newWindow.id });
-                });
-            });
-        }
+        });
     })
 });
 
@@ -37,7 +52,7 @@ chrome.windows.onRemoved.addListener((closedWindowId) => {
 });
 
 // 初始化时加载保存的设置
-chrome.storage.local.get(['refreshInterval', 'targetUrl', 'selectorName'], (result) => {
+chrome.storage.local.get(['refreshInterval', 'targetUrl', 'selectorName', 'witchItemInput'], (result) => {
     if (result.refreshInterval) {
         refreshInterval = result.refreshInterval;
     }
@@ -47,12 +62,15 @@ chrome.storage.local.get(['refreshInterval', 'targetUrl', 'selectorName'], (resu
     if (result.selectorName) {
         selectorName = result.selectorName;
     }
+    if (result.witchItemInput) {
+        witchItemInput = result.witchItemInput;
+    }
 });
 
 // 监听消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'startRefresh') {
-        startRefresh(request.interval, request.url, request.selectorName);
+        startRefresh(request.interval, request.url, request.selectorName, request.witchItemInput);
         sendResponse({ status: 'started' });
     } else if (request.action === 'stopRefresh') {
         stopRefresh();
@@ -68,7 +86,7 @@ function startRefresh(interval, url, selectorName) {
     targetUrl = url;
 
     // 保存设置
-    chrome.storage.local.set({ refreshInterval, targetUrl, selectorName });
+    chrome.storage.local.set({ refreshInterval, targetUrl, selectorName, witchItemInput });
     // 创建定时器
     chrome.alarms.create('refreshTimer', {
         delayInMinutes: 0,
