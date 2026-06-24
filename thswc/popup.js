@@ -3,6 +3,8 @@ import { Mutex } from "./utils.js";
 
 let selectorName = '';
 const mutex = new Mutex();
+const port = chrome.runtime.connect({ name: 'popup-connection' });
+
 let stockList = [
     {
         url: "https://www.iwencai.com/unifiedwap/result?w=%E8%8C%85%E5%8F%B0",
@@ -43,10 +45,10 @@ let editUrl = undefined;
 
 const selectorsEnum = {
     "wc1": {
-        name: ".code-name.f24", //名称
-        dqj: ".price.f24.pr8.fb", //当前价
-        zdf: ".rise-fall.f20",   //涨跌幅(+1.20)元
-        percent: ".rise-fall-rate.f20" //涨跌幅(/+1.0%)
+        name: ".input-base-copy", //名称
+        dqj: ".code-info-bar .price", //当前价
+        zdf: ".code-info-bar .rise-fall",   //涨跌幅(+1.20)元
+        percent: ".code-info-bar .rise-fall-rate" //涨跌幅(/+1.0%)
     }
 }
 
@@ -67,6 +69,70 @@ const stockTableEl = document.getElementById('stockTable');
 const addOrDelDivEl = document.getElementById('addOrDelDiv');
 const addDivEl = document.getElementById('addDiv');
 const delDivEl = document.getElementById('delDiv');
+
+// 监听来自 background 的消息
+port.onMessage.addListener(async (message) => {
+    if (message.type === 'DOCUMENT_CAPTURED') {
+        await mutex.lock();
+        try {
+            const messageUrl = message.documentData.url;
+            const index = urls.findIndex(item => item === messageUrl);
+            if (index === -1) {
+                return;
+            }
+            const stock = stockList[index];
+            const parser = new DOMParser();
+
+            if (message.documentData.html) {
+                const doc = parser.parseFromString(message.documentData.html, 'text/html');
+                if (selectorsEnum[selectorName] !== undefined) {
+                    const selector = selectorsEnum[selectorName];
+                    if (selectorName === 'wc1') {
+                        let name = getTargetData(doc, selector.name);
+                        if (name) {
+                            name = name.replace(/\s*\(.*?\)/, '');
+                            stock.name = name;
+                        } else {
+                            console.error("名称为null，当前价为", parseFloat(getTargetData(doc, selector.dqj)), messageUrl);
+                            return false;
+                        }
+                        let dqj = parseFloat(getTargetData(doc, selector.dqj));
+                        let zdf = parseFloat(getTargetData(doc, selector.zdf));
+                        let percent = getTargetData(doc, selector.percent);
+                        if (percent) {
+                            percent = percent.replace('%', '').replace('/', '');
+                            percent = parseFloat(percent);
+                        }
+                        const kpj = (dqj - zdf).toFixed(2);
+                        if (kpj && kpj !== 'NaN') {
+                            stock.startPrice = kpj;
+                        }
+                        if (dqj) {
+                            stock.currentPrice = dqj;
+                        }
+                        if (percent) {
+                            stock.percent = percent;
+                            if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
+                                createChromeNotification(stock);
+                            } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
+                                createChromeNotification(stock);
+                            }
+                        }
+                        lastUpdateTimeEl.textContent = getDateTime();
+                        chrome.storage.sync.set({ stockList }, (data) => {
+                            renderStockList();
+                        });
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('数据更新错误:', err);
+            lastUpdateTimeEl.textContent = '数据更新失败 ' + getDateTime();
+        } finally {
+            mutex.unlock();
+        }
+    }
+});
 
 closeBtnEl.addEventListener("click", closeModal);
 window.addEventListener("click", (event) => {
@@ -195,73 +261,75 @@ delStockBtnEl.addEventListener('click', () => {
 });
 
 // 接收并处理页面刷新后的数据
-chrome.runtime.onMessage.addListener(async (message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'DOCUMENT_CAPTURED') {
-        await mutex.lock();
-        try {
-            const messageUrl = message.documentData.url;
-            const index = urls.findIndex(item => item === messageUrl);
-            if (index === -1) {
-                return;
-            }
-            const stock = stockList[index];
-            // 将HTML字符串转换为DOM
-            // console.error(JSON.stringify(message.documentData.html));
-            const parser = new DOMParser();
+        (async () => {
+            await mutex.lock();
+            try {
+                const messageUrl = message.documentData.url;
+                const index = urls.findIndex(item => item === messageUrl);
+                if (index === -1) {
+                    return;
+                }
+                const stock = stockList[index];
+                // 将HTML字符串转换为DOM
+                // console.error(JSON.stringify(message.documentData.html));
+                const parser = new DOMParser();
 
-            if (message.documentData.html) {
-                const doc = parser.parseFromString(message.documentData.html, 'text/html');
-                if (selectorsEnum[selectorName] !== undefined) {
-                    const selector = selectorsEnum[selectorName];
-                    if (selectorName === 'wc1') {
-                        let name = getTargetData(doc, selector.name);
-                        if (name) {
-                            name = name.replace(/\s*\(.*?\)/, '');
-                            stock.name = name;
-                            // console.error("加载", name);
-                        } else {
-                            console.error("名称为null，当前价为", parseFloat(getTargetData(doc, selector.dqj)), messageUrl);
-                            return false;
-                        }
-                        let dqj = parseFloat(getTargetData(doc, selector.dqj));
-                        let zdf = parseFloat(getTargetData(doc, selector.zdf));
-                        let percent = getTargetData(doc, selector.percent);
-                        if (percent) {
-                            percent = percent.replace('%', '').replace('/', '');
-                            percent = parseFloat(percent);
-                        }
-                        const kpj = (dqj - zdf).toFixed(2);
-                        if (kpj && kpj !== 'NaN') {
-                            stock.startPrice = kpj;
-                        }
-                        if (dqj) {
-                            stock.currentPrice = dqj;
-                        }
-                        if (percent) {
-                            stock.percent = percent;
-                            //发送价格监控通知
-                            if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
-                                createChromeNotification(stock);
-                            } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
-                                createChromeNotification(stock);
+                if (message.documentData.html) {
+                    const doc = parser.parseFromString(message.documentData.html, 'text/html');
+                    if (selectorsEnum[selectorName] !== undefined) {
+                        const selector = selectorsEnum[selectorName];
+                        if (selectorName === 'wc1') {
+                            let name = getTargetData(doc, selector.name);
+                            if (name) {
+                                name = name.replace(/\s*\(.*?\)/, '');
+                                stock.name = name;
+                                // console.error("加载", name);
+                            } else {
+                                console.error("名称为null，当前价为", parseFloat(getTargetData(doc, selector.dqj)), messageUrl);
+                                return false;
                             }
+                            let dqj = parseFloat(getTargetData(doc, selector.dqj));
+                            let zdf = parseFloat(getTargetData(doc, selector.zdf));
+                            let percent = getTargetData(doc, selector.percent);
+                            if (percent) {
+                                percent = percent.replace('%', '').replace('/', '');
+                                percent = parseFloat(percent);
+                            }
+                            const kpj = (dqj - zdf).toFixed(2);
+                            if (kpj && kpj !== 'NaN') {
+                                stock.startPrice = kpj;
+                            }
+                            if (dqj) {
+                                stock.currentPrice = dqj;
+                            }
+                            if (percent) {
+                                stock.percent = percent;
+                                //发送价格监控通知
+                                if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
+                                    createChromeNotification(stock);
+                                } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
+                                    createChromeNotification(stock);
+                                }
+                            }
+                            lastUpdateTimeEl.textContent = getDateTime();
+                            // console.error('name', stock.name, 'startPrice', stock.startPrice, 'currentPrice', stock.currentPrice, 'percent', stock.percent);
+                            chrome.storage.sync.set({ stockList }, (data) => {
+                                renderStockList();
+                            });
                         }
-                        lastUpdateTimeEl.textContent = getDateTime();
-                        // console.error('name', stock.name, 'startPrice', stock.startPrice, 'currentPrice', stock.currentPrice, 'percent', stock.percent);
-                        chrome.storage.sync.set({ stockList }, (data) => {
-                            renderStockList();
-                        });
                     }
                 }
+            } catch (err) {
+                console.error('数据更新错误:', err);
+                lastUpdateTimeEl.textContent = '数据更新失败 ' + getDateTime();
+            } finally {
+                mutex.unlock();
             }
-        } catch (err) {
-            console.error('数据更新错误:', err);
-            lastUpdateTimeEl.textContent = '数据更新失败 ' + getDateTime();
-        } finally {
-            mutex.unlock();
-        }
-        return true;
+        })();
     }
+    return true;
 });
 
 // 从html中获取目标数据

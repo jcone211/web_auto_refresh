@@ -3,8 +3,41 @@ let refreshInterval = 30; // 默认30秒
 let selectorName = '';
 let stockList = [];
 let targetUrls = [];
+let popupPort = null;
 
 init();
+
+chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === 'popup-connection') {
+        popupPort = port;
+        port.onDisconnect.addListener(() => {
+            popupPort = null;
+        });
+    }
+});
+
+// 监听标签页更新，动态注入脚本
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status !== 'complete' || !isIwencaiUrl(tab.url)) return;
+
+    chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content.js']
+    }).catch(err => console.error('脚本执行失败:', err));
+});
+
+function isIwencaiUrl(url) {
+    if (!url) return false;
+
+    try {
+        const { hostname } = new URL(url);
+        return hostname === 'iwencai.com' || hostname.endsWith('.iwencai.com');
+    } catch {
+        return false;
+    }
+}
+
+
 
 chrome.action.onClicked.addListener(() => {
     chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
@@ -68,6 +101,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ refreshInterval, selectorName, stockList });
     } else if (request.action === 'refresh') {
         init();
+    } else if (request.type === 'DOCUMENT_CAPTURED') {
+        if (popupPort) {
+            popupPort.postMessage(request);
+        }
+        sendResponse({ status: 'received', forwarded: !!popupPort });
     }
 });
 
