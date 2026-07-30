@@ -40,7 +40,6 @@ let stockList = [
         stopRunning: true,  //是否运行
     },
 ]
-let urls = [];
 let editUrl = undefined;
 
 const selectorsEnum = {
@@ -76,7 +75,7 @@ port.onMessage.addListener(async (message) => {
         await mutex.lock();
         try {
             const messageUrl = message.documentData.url;
-            const index = urls.findIndex(item => item === messageUrl);
+            const index = stockList.findIndex(item => item.url === messageUrl);
             if (index === -1) {
                 return;
             }
@@ -147,7 +146,6 @@ chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
         intervalInput.value = response.refreshInterval || 60;
         selectorEl.value = response.selectorName || '';
         stockList = response.stockList || [];
-        urls = stockList.map(item => item.url);
         updateStatus(false);
         renderStockList()
     }
@@ -260,78 +258,6 @@ delStockBtnEl.addEventListener('click', () => {
             });
         }
     })
-});
-
-// 接收并处理页面刷新后的数据
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'DOCUMENT_CAPTURED') {
-        (async () => {
-            await mutex.lock();
-            try {
-                const messageUrl = message.documentData.url;
-                const index = urls.findIndex(item => item === messageUrl);
-                if (index === -1) {
-                    return;
-                }
-                const stock = stockList[index];
-                // 将HTML字符串转换为DOM
-                // console.error(JSON.stringify(message.documentData.html));
-                const parser = new DOMParser();
-
-                if (message.documentData.html) {
-                    const doc = parser.parseFromString(message.documentData.html, 'text/html');
-                    if (selectorsEnum[selectorName] !== undefined) {
-                        const selector = selectorsEnum[selectorName];
-                        if (selectorName === 'wc1') {
-                            let name = getTargetData(doc, selector.name);
-                            if (name) {
-                                name = name.replace(/\s*\(.*?\)/, '');
-                                stock.name = name;
-                                // console.error("加载", name);
-                            } else {
-                                console.error("名称为null，当前价为", parseFloat(getTargetData(doc, selector.dqj)), messageUrl);
-                                return false;
-                            }
-                            let dqj = parseFloat(getTargetData(doc, selector.dqj));
-                            let zdf = parseFloat(getTargetData(doc, selector.zdf));
-                            let percent = getTargetData(doc, selector.percent);
-                            if (percent) {
-                                percent = percent.replace('%', '').replace('/', '');
-                                percent = parseFloat(percent);
-                            }
-                            const kpj = (dqj - zdf).toFixed(2);
-                            if (kpj && kpj !== 'NaN') {
-                                stock.startPrice = kpj;
-                            }
-                            if (dqj) {
-                                stock.currentPrice = dqj;
-                            }
-                            if (percent) {
-                                stock.percent = percent;
-                                //发送价格监控通知
-                                if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
-                                    createChromeNotification(stock);
-                                } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
-                                    createChromeNotification(stock);
-                                }
-                            }
-                            lastUpdateTimeEl.textContent = getDateTime();
-                            // console.error('name', stock.name, 'startPrice', stock.startPrice, 'currentPrice', stock.currentPrice, 'percent', stock.percent);
-                            chrome.storage.sync.set({ stockList }, (data) => {
-                                renderStockList();
-                            });
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error('数据更新错误:', err);
-                lastUpdateTimeEl.textContent = '数据更新失败 ' + getDateTime();
-            } finally {
-                mutex.unlock();
-            }
-        })();
-    }
-    return true;
 });
 
 // 从html中获取目标数据
