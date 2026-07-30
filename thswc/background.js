@@ -149,5 +149,5 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // 延迟刷新反风控
 function getRandomTime() {
-    return Math.floor(Math.random() * (1200 - 3500) + 3500);
+    return Math.floor(Math.random() * (3500 - 1200) + 1200);
 }
