@@ -22,7 +22,6 @@ chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
     if (response) {
         urlInput.value = response.targetUrl || '';
         intervalInput.value = response.refreshInterval || 60;
-        console.log(response);
         witchItemInput.value = response.witchItemInput || 1;
         selectorEl.value = response.selectorName || '';
         targetUrl = response.targetUrl || '';
@@ -50,7 +49,8 @@ startBtn.addEventListener('click', () => {
         action: 'startRefresh',
         interval: interval,
         url: url,
-        selectorName: selectorName
+        selectorName: selectorName,
+        witchItemInput: parseInt(witchItemInput.value) || 1
     }, (response) => {
         if (response && response.status === 'started') {
             targetUrl = url;
@@ -108,7 +108,7 @@ chrome.runtime.onMessage.addListener((message) => {
             if (selectorName) {
                 let targetData = '';
                 if (selectorName.startsWith("#")) {
-                    targetData = doc.getElementsById(selectorName.substring(1));
+                    targetData = doc.getElementById(selectorName.substring(1));
                 } else {
                     targetData = doc.querySelectorAll(selectorName)[witchItemInput.value - 1];
                 }

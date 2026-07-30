@@ -46,31 +46,33 @@ chrome.action.onClicked.addListener(() => {
                 chrome.storage.local.set({ popupWindowId: null });
             });
         } else {
-            chrome.windows.getCurrent((currentWindow) => {
-                chrome.windows.create({
-                    url: chrome.runtime.getURL('popup.html'),
-                    type: 'popup',
-                    width: 600,
-                    height: 436 + (stockList.length - 2) * 45,
-                    left: currentWindow.width - 400,
-                    top: 50
-                }, (newWindow) => {
-                    chrome.storage.local.set({ popupWindowId: newWindow.id });
+            // 直接从 storage 读股票列表计算高度，避免模块级 stockList 尚未加载完时按空列表尺寸创建
+            chrome.storage.sync.get(['stockList'], ({ stockList: storedList }) => {
+                const stockCount = (storedList || []).length;
+                chrome.windows.getCurrent((currentWindow) => {
+                    chrome.windows.create({
+                        url: chrome.runtime.getURL('popup.html'),
+                        type: 'popup',
+                        width: 600,
+                        height: 436 + Math.max(stockCount - 2, 0) * 45,
+                        left: currentWindow.width - 400,
+                        top: 50
+                    }, (newWindow) => {
+                        chrome.storage.local.set({ popupWindowId: newWindow.id });
+                    });
                 });
             });
         }
     })
 });
 
-// 监听窗口关闭
+// 监听窗口关闭：仅当关闭的是插件弹窗时停止监控
 chrome.windows.onRemoved.addListener((closedWindowId) => {
     chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
-        if (closedWindowId === popupWindowId) {
-            chrome.storage.local.set({ popupWindowId: null });
-        }
-    })
-    chrome.alarms.clear('refreshTimer');
-    init();
+        if (closedWindowId !== popupWindowId) return;
+        chrome.storage.local.set({ popupWindowId: null });
+        chrome.alarms.clearAll();
+    });
 });
 
 // 初始化时加载保存的设置
@@ -123,29 +125,47 @@ function startRefresh(interval, sn) {
 
 // 停止定时刷新
 function stopRefresh() {
-    chrome.alarms.clear('refreshTimer');
+    // 同时清掉主定时器和已排队的各股票一次性 alarm
+    chrome.alarms.clearAll();
 }
+
+// 各股票一次性刷新 alarm 的名称前缀
+const STOCK_ALARM_PREFIX = 'refreshStock:';
 
 // 定时器触发时刷新页面
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'refreshTimer') {
-        if (targetUrls.length > 0) {
-            let delay = 0;
-            targetUrls.forEach(url => {
-                delay += getRandomTime();
-                setTimeout(() => {
-                    chrome.tabs.query({ url: url }, (tabs) => {
-                        if (tabs.length > 0) {
-                            chrome.tabs.reload(tabs[0].id);
-                        } else {
-                            chrome.tabs.create({ url: url });
-                        }
-                    });
-                }, delay)
-            })
-        }
+        // 每只股票排一个一次性 alarm，随机延迟错开反风控；
+        // alarm 由浏览器进程托管，不随 service worker 回收而丢失，股票数量不受限
+        let delay = 0;
+        targetUrls.forEach(url => {
+            delay += getRandomTime();
+            chrome.alarms.create(STOCK_ALARM_PREFIX + url, { when: Date.now() + delay });
+        });
+    } else if (alarm.name.startsWith(STOCK_ALARM_PREFIX)) {
+        const url = alarm.name.slice(STOCK_ALARM_PREFIX.length);
+        // 直接从 storage 读最新列表，避免 service worker 冷启动时模块级 targetUrls 尚未加载而误跳过
+        chrome.storage.sync.get(['stockList'], ({ stockList: storedList }) => {
+            const stillActive = (storedList || []).some(item => item.url === url && !item.stopRunning);
+            if (!stillActive) return;
+            refreshStockTab(url);
+        });
     }
 });
+
+// 刷新（或新打开）单只股票的标签页
+function refreshStockTab(url) {
+    chrome.tabs.query({ url: url }, (tabs) => {
+        // query 的 url 参数按 match pattern 语义匹配、不区分 query string，
+        // 各股票 path 相同会互相命中，需按完整 URL 精确过滤
+        const target = tabs.find(t => t.url === url);
+        if (target) {
+            chrome.tabs.reload(target.id);
+        } else {
+            chrome.tabs.create({ url: url });
+        }
+    });
+}
 
 // 延迟刷新反风控
 function getRandomTime() {

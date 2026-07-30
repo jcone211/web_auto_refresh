@@ -111,10 +111,16 @@ port.onMessage.addListener(async (message) => {
                         }
                         if (percent) {
                             stock.percent = percent;
-                            if (stock.targetPercentLe && percent <= stock.targetPercentLe) {
-                                createChromeNotification(stock);
-                            } else if (stock.targetPercentGe && percent >= stock.targetPercentGe) {
-                                createChromeNotification(stock);
+                            const hitThreshold = (stock.targetPercentLe && percent <= stock.targetPercentLe)
+                                || (stock.targetPercentGe && percent >= stock.targetPercentGe);
+                            if (hitThreshold) {
+                                // 越过阈值后只通知一次，回到区间内再次越过才会重新通知
+                                if (!stock.notified) {
+                                    stock.notified = true;
+                                    createChromeNotification(stock);
+                                }
+                            } else {
+                                stock.notified = false;
                             }
                         }
                         lastUpdateTimeEl.textContent = getDateTime();
@@ -219,7 +225,7 @@ saveStockBtnEl.addEventListener('click', () => {
     }
     if (editUrl) {
         const list = stockList.filter(item => item.url === editUrl);
-        if (list.length < 0) {
+        if (list.length === 0) {
             alert('保存失败，请关闭重试');
             return;
         }
@@ -227,6 +233,8 @@ saveStockBtnEl.addEventListener('click', () => {
         item.name = document.getElementById('stockName').value;
         item.targetPercentLe = document.getElementById('targetPercentLe').value;
         item.targetPercentGe = document.getElementById('targetPercentGe').value;
+        // 阈值变更后重置通知标记，确保新阈值能再次触发通知
+        item.notified = false;
     } else {
         stockList.push({
             url: url,
@@ -264,7 +272,7 @@ delStockBtnEl.addEventListener('click', () => {
 function getTargetData(doc, selectorName) {
     let targetData = '';
     if (selectorName.startsWith("#")) {
-        targetData = doc.getElementsById(selectorName.substring(1));
+        targetData = doc.getElementById(selectorName.substring(1));
     } else {
         targetData = doc.querySelector(selectorName);
     }
@@ -298,12 +306,33 @@ function renderStockList() {
 function renderStock(stockIndex) {
     const tr = document.createElement('tr');
     const stock = stockList[stockIndex];
-    tr.innerHTML = `
-        <td>${stock.name ? stock.name : '-'}</td>
-        <td>${stock.startPrice ? stock.startPrice : '-'}</td>
-        <td>${stock.startPrice && stock.currentPrice ? '<text class="' + (stock.startPrice > stock.currentPrice ? 'fall">' : 'rise">') + stock.currentPrice + '</text>' : '-'}</td>
-        <td>${stock.percent ? stock.percent + '%' : '-'}</td>
-        <td>${getTargetPercentStr(stock.targetPercentLe, stock.targetPercentGe)}</td>`;
+    // 用 createElement/textContent 构建整行，避免第三方页面文本（如 stock.name）注入 HTML
+    const nameTd = document.createElement('td');
+    nameTd.textContent = stock.name ? stock.name : '-';
+    tr.appendChild(nameTd);
+
+    const startPriceTd = document.createElement('td');
+    startPriceTd.textContent = stock.startPrice ? stock.startPrice : '-';
+    tr.appendChild(startPriceTd);
+
+    const currentPriceTd = document.createElement('td');
+    if (stock.startPrice && stock.currentPrice) {
+        const priceEl = document.createElement('span');
+        priceEl.className = stock.startPrice > stock.currentPrice ? 'fall' : 'rise';
+        priceEl.textContent = stock.currentPrice;
+        currentPriceTd.appendChild(priceEl);
+    } else {
+        currentPriceTd.textContent = '-';
+    }
+    tr.appendChild(currentPriceTd);
+
+    const percentTd = document.createElement('td');
+    percentTd.textContent = stock.percent ? stock.percent + '%' : '-';
+    tr.appendChild(percentTd);
+
+    const targetTd = document.createElement('td');
+    targetTd.textContent = getTargetPercentStr(stock.targetPercentLe, stock.targetPercentGe);
+    tr.appendChild(targetTd);
 
     const td = document.createElement('td');
     const div = document.createElement('div');
@@ -381,10 +410,15 @@ function renderEditForm(stock) {
     document.getElementById('stockUrl').value = stock.url;
     document.getElementById('stockName').value = stock.name ? stock.name : '';
     document.getElementById('startPrice').textContent = stock.startPrice ? stock.startPrice : '-';
+    const currentPriceEl = document.getElementById('currentPrice');
+    currentPriceEl.textContent = '';
     if (stock.startPrice && stock.currentPrice) {
-        document.getElementById('currentPrice').innerHTML = '<text class="' + (stock.startPrice > stock.currentPrice ? 'fall' : 'rise') + '">' + stock.currentPrice + '</text>';
+        const priceEl = document.createElement('span');
+        priceEl.className = stock.startPrice > stock.currentPrice ? 'fall' : 'rise';
+        priceEl.textContent = stock.currentPrice;
+        currentPriceEl.appendChild(priceEl);
     } else {
-        document.getElementById('currentPrice').textContent = '-';
+        currentPriceEl.textContent = '-';
     }
     document.getElementById('percent').textContent = stock.percent ? (stock.percent + '%') : '-';
     document.getElementById('targetPercentLe').value = stock.targetPercentLe ? stock.targetPercentLe : null;

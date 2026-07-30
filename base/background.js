@@ -41,14 +41,13 @@ chrome.action.onClicked.addListener(() => {
     })
 });
 
-// 监听窗口关闭
+// 监听窗口关闭：仅当关闭的是插件弹窗时停止定时刷新
 chrome.windows.onRemoved.addListener((closedWindowId) => {
     chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
-        if (closedWindowId === popupWindowId) {
-            chrome.storage.local.set({ popupWindowId: null });
-        }
-    })
-    chrome.alarms.clear('refreshTimer');
+        if (closedWindowId !== popupWindowId) return;
+        chrome.storage.local.set({ popupWindowId: null });
+        chrome.alarms.clear('refreshTimer');
+    });
 });
 
 // 初始化时加载保存的设置
@@ -76,14 +75,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         stopRefresh();
         sendResponse({ status: 'stopped' });
     } else if (request.action === 'getStatus') {
-        sendResponse({ refreshInterval, targetUrl, selectorName });
+        sendResponse({ refreshInterval, targetUrl, selectorName, witchItemInput });
     }
 });
 
 // 开始定时刷新
-function startRefresh(interval, url, selectorName) {
+function startRefresh(interval, url, sn, witchItem) {
     refreshInterval = interval;
     targetUrl = url;
+    selectorName = sn;
+    witchItemInput = witchItem ?? witchItemInput;
 
     // 保存设置
     chrome.storage.local.set({ refreshInterval, targetUrl, selectorName, witchItemInput });

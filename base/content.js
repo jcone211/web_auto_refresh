@@ -37,8 +37,20 @@ window.addEventListener('load', () => {
 
 // 监听history变化(单页应用伪更新)
 const handleSPANavigation = () => {
-    // SPA导航后延迟1秒捕获
+    // SPA导航后延迟捕获，等待动态内容渲染完成
     setTimeout(captureDocument, 2000);
+};
+
+// pushState/replaceState 没有原生事件，hook 后派发自定义事件使下面的监听生效
+const originalPushState = history.pushState;
+history.pushState = function (...args) {
+    originalPushState.apply(this, args);
+    window.dispatchEvent(new Event('pushstate'));
+};
+const originalReplaceState = history.replaceState;
+history.replaceState = function (...args) {
+    originalReplaceState.apply(this, args);
+    window.dispatchEvent(new Event('replacestate'));
 };
 
 window.addEventListener('popstate', handleSPANavigation);
