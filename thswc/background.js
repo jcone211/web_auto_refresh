@@ -2,7 +2,6 @@
 let refreshInterval = 30; // 默认30秒
 let selectorName = '';
 let stockList = [];
-let targetUrls = [];
 let popupPort = null;
 
 init();
@@ -86,7 +85,6 @@ function init() {
         }
         if (result.stockList) {
             stockList = result.stockList;
-            targetUrls = stockList ? stockList.filter(item => !item.stopRunning).map(item => item.url) : [];
         }
     });
 }
@@ -136,11 +134,13 @@ const STOCK_ALARM_PREFIX = 'refreshStock:';
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'refreshTimer') {
         // 每只股票排一个一次性 alarm，随机延迟错开反风控；
-        // alarm 由浏览器进程托管，不随 service worker 回收而丢失，股票数量不受限
-        let delay = 0;
-        targetUrls.forEach(url => {
-            delay += getRandomTime();
-            chrome.alarms.create(STOCK_ALARM_PREFIX + url, { when: Date.now() + delay });
+        chrome.storage.sync.get(['stockList'], ({ stockList: storedList }) => {
+            const urls = (storedList || []).filter(item => !item.stopRunning).map(item => item.url);
+            let delay = 0;
+            urls.forEach(url => {
+                delay += getRandomTime();
+                chrome.alarms.create(STOCK_ALARM_PREFIX + url, { when: Date.now() + delay });
+            });
         });
     } else if (alarm.name.startsWith(STOCK_ALARM_PREFIX)) {
         const url = alarm.name.slice(STOCK_ALARM_PREFIX.length);

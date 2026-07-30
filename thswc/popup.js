@@ -80,6 +80,10 @@ port.onMessage.addListener(async (message) => {
                 return;
             }
             const stock = stockList[index];
+            // 已停止的股票不解析、不通知（页面可能被手动刷新等方式加载）
+            if (stock.stopRunning) {
+                return;
+            }
             const parser = new DOMParser();
 
             if (message.documentData.html) {
