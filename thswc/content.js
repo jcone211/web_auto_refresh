@@ -3,18 +3,32 @@ if (!window.__thswcContentInjected) {
 
     let debounceTimer;
     let lastCaptureAt = 0;
-    // let timer = 0;
-    // chrome.storage.local.get('localTimer', (result) => {
-    //     if (!('localTimer' in result)) {
-    //         chrome.storage.local.set({ localTimer: 0 });
-    //         timer = 0;
-    //     } else {
-    //         timer = result.localTimer;
-    //     }
-    // });
+    let observer = null;
+    let invalidated = false;
+
+    // 扩展重载/更新后，已注入的旧 content script 运行上下文失效：
+    // 此时 chrome.runtime / sendMessage 仍存在，但调用即抛
+    // "Extension context invalidated"。正确判据是 chrome.runtime.id（失效时为 undefined）。
+    function isContextValid() {
+        return !!(chrome.runtime && chrome.runtime.id);
+    }
+
+    // 上下文失效后拆除监听、停止重试，避免 MutationObserver 反复触发刷屏报错
+    function teardown() {
+        invalidated = true;
+        clearTimeout(debounceTimer);
+        if (observer) {
+            observer.disconnect();
+            observer = null;
+        }
+    }
 
     //校验+防抖
     function captureVerify() {
+        if (invalidated || !isContextValid()) {
+            teardown();
+            return;
+        }
         if (document.readyState !== 'complete') return;
 
         const now = Date.now();
@@ -28,7 +42,10 @@ if (!window.__thswcContentInjected) {
     }
 
     function captureDocument() {
-        if (!chrome.runtime || !chrome.runtime.sendMessage) return;
+        if (!isContextValid()) {
+            teardown();
+            return;
+        }
 
         const message = {
             type: 'DOCUMENT_CAPTURED',
@@ -40,7 +57,13 @@ if (!window.__thswcContentInjected) {
             }
         };
 
-        chrome.runtime.sendMessage(message);
+        try {
+            chrome.runtime.sendMessage(message);
+        } catch (err) {
+            // 调用时才暴露的失效：静默拆除，重载扩展后刷新页面即可恢复
+            console.warn('thswc 抓取脚本上下文已失效，已停止抓取（重载扩展后请刷新该页面）');
+            teardown();
+        }
     }
 
     // 初始抓取
@@ -51,10 +74,11 @@ if (!window.__thswcContentInjected) {
     // }
 
     // 监听动态新增元素
-    const observer = new MutationObserver((mutationsList) => {
+    observer = new MutationObserver((mutationsList) => {
         for (const mutation of mutationsList) {
             if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
                 captureVerify();
+                break;
             }
         }
     });
@@ -64,7 +88,7 @@ if (!window.__thswcContentInjected) {
     }
 
     window.addEventListener('beforeunload', () => {
-        observer.disconnect();
+        if (observer) observer.disconnect();
     });
 
     captureVerify();

@@ -1,5 +1,7 @@
 body {
-  width: 540px;
+  width: 100%;
+  max-width: 680px;
+  box-sizing: border-box;
   padding: 15px;
   font-family: Arial, sans-serif;
 }
@@ -139,6 +141,8 @@ button:disabled {
   left: 0;
   width: 100%;
   height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
   background-color: rgba(0, 0, 0, 0.4);
   display: none;
   align-items: center;
@@ -149,10 +153,40 @@ button:disabled {
 .stock-model {
   background: white;
   width: 70%;
+  max-height: 100%;
   padding: 30px 20px 20px;
   border-radius: 5px;
   position: relative;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 弹窗内容滚动区：外壳(含关闭按钮)不滚动，内容超出时仅此处上下滚动 */
+.stock-model-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.stock-model-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.stock-model-body::-webkit-scrollbar-thumb {
+  background: #c8ccd0;
+  border-radius: 4px;
+}
+
+.stock-model-body::-webkit-scrollbar-thumb:hover {
+  background: #a9aeb3;
+}
+
+.stock-model-body::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .close-btn {
@@ -179,12 +213,14 @@ button:disabled {
   width: 100%;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 4px;
   gap: 5px;
   font-size: large;
 }
 
 .target-percent-div input {
-  width: 80px;
+  width: 64px;
 }
 
 .last-monitor {
@@ -211,6 +247,7 @@ button:disabled {
 .stock-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 /* 表头样式 */
@@ -220,10 +257,11 @@ button:disabled {
 }
 
 .stock-table th {
-  padding: 12px 15px;
+  padding: 10px 6px;
   text-align: left;
   font-weight: 600;
   font-size: 14px;
+  overflow: hidden;
 }
 
 /* 表格内容样式 */
@@ -237,9 +275,24 @@ button:disabled {
 }
 
 .stock-table td {
-  padding: 12px 15px;
+  padding: 10px 6px;
   font-size: 14px;
   color: #333;
+  overflow: hidden;
+}
+
+/* 名称列：长名称省略号截断，给复制图标留位 */
+.stock-table td:first-child {
+  white-space: nowrap;
+}
+
+.stock-table td:first-child > span {
+  display: inline-block;
+  max-width: calc(100% - 22px);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 涨跌幅颜色 */
@@ -292,4 +345,219 @@ button:disabled {
 
 .btn-embossed:active {
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 表格页脚：左分页、右导入导出 */
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px 2px;
+  flex-wrap: wrap;
+}
+
+/* 导入导出栏 */
+.import-export-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.io-btn {
+  width: auto;
+  height: auto;
+  padding: 3px 14px;
+  background: #fff;
+  color: #333;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.io-btn:hover {
+  background: #f8f9fa;
+  border-color: #4caf50;
+  color: #4caf50;
+}
+
+/* 视图切换（股票列表 / 垃圾池） */
+.view-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.view-header h3 {
+  margin: 0;
+}
+
+.view-toggles {
+  display: flex;
+  gap: 4px;
+}
+
+.view-toggle-btn {
+  width: auto;
+  height: auto;
+  padding: 2px 10px;
+  background: none;
+  border: 1px solid #4caf50;
+  color: #4caf50;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.view-toggle-btn.active {
+  background: #4caf50;
+  color: #fff;
+}
+
+/* 分页栏 */
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.pagination-bar button {
+  width: auto;
+  height: auto;
+  padding: 2px 10px;
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.pagination-bar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: #f0f0f0;
+}
+
+.pagination-bar label {
+  display: inline;
+  margin: 0;
+  font-weight: normal;
+}
+
+.page-size-input {
+  width: 50px;
+  text-align: center;
+  padding: 2px;
+}
+
+/* 排序切换 */
+.sort-toggle {
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 2px;
+  opacity: 0.45;
+  user-select: none;
+}
+
+.sort-toggle.active {
+  opacity: 1;
+  font-weight: bold;
+  color: #4caf50;
+}
+
+/* 涨跌幅双行（当日 / 导入以来） */
+.percent-dual {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.4;
+}
+
+.percent-dual .import-percent {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+/* 详情页分区 */
+.detail-section {
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+}
+
+.detail-section h5 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #666;
+}
+
+.detail-section .stock-data span {
+  font-size: 14px;
+}
+
+/* 详情页内联数字输入框 */
+.inline-number-input {
+  width: 100%;
+  max-width: 96px;
+  padding: 2px 4px;
+  box-sizing: border-box;
+  text-align: center;
+  font-size: 14px;
+}
+
+/* 目标价联动输入框 */
+.target-price-input {
+  width: 64px;
+  margin-left: 2px;
+  padding: 4px;
+  font-size: 13px;
+  color: #666;
+}
+
+.target-price-input:disabled {
+  background: #f5f5f5;
+  color: #bbb;
+}
+
+/* 目标涨跌幅整行（全宽，避免输入框溢出弹窗） */
+.target-group {
+  margin-bottom: 6px;
+}
+
+/* 垃圾池按钮 */
+.trash-toggle-div {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.trash-embossed {
+  background: #fff;
+  color: #e67e22;
+  border: 1px solid #e67e22;
+}
+
+.trash-embossed:hover {
+  background: #e67e22;
+  color: #fff;
+}
+
+/* 复制图标 */
+.copy-icon {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  margin-left: 5px;
+  vertical-align: middle;
+  opacity: 0.5;
+}
+
+.copy-icon:hover,
+.copy-icon.copied {
+  opacity: 1;
 }

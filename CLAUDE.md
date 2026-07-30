@@ -35,7 +35,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | content script 注入 | manifest 静态声明 `<all_urls>` | manifest 中 `content_scripts` 为空，background 在 `tabs.onUpdated`（status=complete 且 hostname 为 iwencai.com）时用 `chrome.scripting.executeScript` 程序化注入 |
 | 防重复注入 | 无 | content.js 顶层 `window.__thswcContentInjected` 标记 |
 | popup 接收数据 | 直接 `chrome.runtime.onMessage` | background 经持久 port（`popup-connection`）转发，popup 只在 `port.onMessage` 一处处理（`DOCUMENT_CAPTURED` 的解析逻辑不要再用 `chrome.runtime.onMessage` 注册，会与 port 通道重复处理） |
-| 持久化 | `chrome.storage.local` | `chrome.storage.sync` |
+| 持久化 | `chrome.storage.local` | 设置（interval/selector/pageSize）在 `chrome.storage.sync`，stockList/currentView 在 `local`（sync 单项 8KB 上限装不下大列表） |
 | 监控目标 | 单 URL | stockList 多只股票，每只一个标签页 |
 | 反风控 | 无 | 多标签 reload 之间加随机延迟（`getRandomTime`） |
 
@@ -44,13 +44,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - popup.js 通过 `import` 使用 `utils.js`（`getDateTime`、`Mutex`）；`Mutex` 用于串行化并发的 `DOCUMENT_CAPTURED` 处理，新增异步解析逻辑时须包在 lock/unlock 内。
 - 选择器表 `selectorsEnum`：目前只有 `wc1` 一组（对应 iwencai 结果页的名称/当前价/涨跌额/涨跌幅）。支持新版式 = 加一组枚举并在 popup.js 的处理分支中扩展。
 - 开盘价由 `当前价 - 涨跌额` 反推（`kpj = dqj - zdf`），页面上没有直接的开盘价字段。
-- 股票条目 `stopRunning: true` 表示不参与定时刷新（background 的 `targetUrls` 会过滤）；增删股票或切换启停后需发 `{action: 'refresh'}` 让 background 重载配置。
+- 股票条目 `stopRunning: true` 表示不参与定时刷新，`inTrash: true` 表示在垃圾池。background 调度按 `currentView`（list/trash，持久化在 local）+ `inTrash` + `stopRunning` 三重过滤——只刷新当前视图下的股票；增删股票/切换启停发 `{action: 'refresh'}`，切换视图发 `{action: 'setView'}`。
+- 数据模型：`importPrice`（初始价格，首次抓取自动回填当前价，之后仅手动改）；`importTargetPercentLe/Ge`（导入以来目标阈值）；通知锁存 `notifiedDaily`/`notifiedImport` 相互独立，当日或导入以来任一越界即通知；导入以来涨跌幅为派生值 `(currentPrice-importPrice)/importPrice*100`，不存储。
+- 首次启动自动把 stockList 从 sync 迁移到 local（background `ensureMigrated` 幂等，background 是唯一迁移执行者，popup 不自行迁移）；存储的 url 恒为 `new URL().href` 百分号编码形态，显示层统一 `safeDecodeUrl` 解码。
+- popup 列表支持分页（pageSize 存 sync，默认 10）、按当日/导入以来涨跌幅排序、股票列表与垃圾池双视图；数据可经工具栏导入导出 JSON（导入按 URL 合并）。
 - 股票列表通过 DOM 字符串拼接渲染（`renderStock`），编辑/启停按钮在渲染时逐个绑定事件，勿依赖事件委托。
 
 ## 编码约定
 
 - 界面文案与注释使用中文；变量名、消息 action 名使用英文。
-- 消息协议两套字段并存：`action`（控制指令：`startRefresh` / `stopRefresh` / `getStatus` / `refresh`）与 `type`（数据上报：`DOCUMENT_CAPTURED`），新增消息沿用此风格。
+- 消息协议两套字段并存：`action`（控制指令：`startRefresh` / `stopRefresh` / `getStatus` / `refresh` / `setView`）与 `type`（数据上报：`DOCUMENT_CAPTURED`），新增消息沿用此风格。
 
 <!-- superpowers-zh:begin (do not edit between these markers) -->
 # Superpowers-ZH 中文增强版

@@ -29,7 +29,13 @@
     </div>
     <div class="form-group">
         <div class="container">
-            <h3>股票列表</h3>
+            <div class="view-header">
+                <h3 id="viewTitle">股票列表</h3>
+                <div class="view-toggles">
+                    <button id="viewListBtn" class="view-toggle-btn active">股票</button>
+                    <button id="viewTrashBtn" class="view-toggle-btn">垃圾池</button>
+                </div>
+            </div>
             <div class="container">
                 <div class="btn-container">
                     <button id="startBtn">开始</button>
@@ -40,13 +46,25 @@
         </div>
         <div class="stock-table-container">
             <table class="stock-table">
+                <colgroup>
+                    <col style="width:24%">
+                    <col style="width:13%">
+                    <col style="width:13%">
+                    <col style="width:13%">
+                    <col style="width:22%">
+                    <col style="width:15%">
+                </colgroup>
                 <thead>
                     <tr>
-                        <th></th>
+                        <th>名称</th>
+                        <th>初始价格</th>
                         <th>开盘价</th>
                         <th>现价</th>
-                        <th>涨跌幅</th>
-                        <th>目标</th>
+                        <th>
+                            涨跌幅
+                            <span class="sort-toggle" data-field="percent" title="按当日涨跌幅排序">⇅</span>
+                            <span class="sort-toggle" data-field="importPercent" title="按导入以来涨跌幅排序">⇅</span>
+                        </th>
                         <th></th>
                     </tr>
                 </thead>
@@ -54,41 +72,75 @@
                 <tbody id="stockTable"></tbody>
             </table>
         </div>
+        <div class="table-footer">
+            <div class="import-export-bar">
+                <button id="exportBtn" class="io-btn">导出</button>
+                <button id="importBtn" class="io-btn">导入</button>
+                <input type="file" id="importFileInput" accept=".json,application/json" style="display:none">
+            </div>
+            <div id="paginationBar" class="pagination-bar"></div>
+        </div>
     </div>
 
     <!-- 添加编辑股票div -->
     <div class="overlay">
         <div id="stockModel" class="stock-model">
             <div class="close-btn">x</div>
-            <div>
+            <div class="stock-model-body">
                 <div class="last-monitor" id="lastMonitor">
-                    <div class="stock-data" style="margin-bottom: 6px;">
-                        <span>开盘价</span>
-                        <span>现价</span>
-                        <span>涨跌幅</span>
-                        <span>目标价</span>
+                    <div class="detail-section">
+                        <h5>当日情况</h5>
+                        <div class="stock-data">
+                            <span>开盘价</span>
+                            <span>现价</span>
+                            <span>涨跌幅</span>
+                            <span>当日目标价</span>
+                        </div>
+                        <div class="stock-data">
+                            <span id="startPrice">-</span>
+                            <span id="currentPrice">-</span>
+                            <span id="percent">-</span>
+                            <span id="targetPrice">-</span>
+                        </div>
                     </div>
-                    <div class="stock-data">
-                        <span id="startPrice">-</span>
-                        <span id="currentPrice">-</span>
-                        <span id="percent">-</span>
-                        <span id="targetPrice">-</span>
+                    <div class="detail-section">
+                        <h5>导入以来</h5>
+                        <div class="stock-data">
+                            <span>初始价格</span>
+                            <span>现价</span>
+                            <span>涨跌幅</span>
+                            <span>导入目标价</span>
+                        </div>
+                        <div class="stock-data">
+                            <span><input type="number" id="importPriceInput" class="inline-number-input" step="0.01"
+                                    placeholder="首次抓取自动填入"></span>
+                            <span id="importCurrentPrice">-</span>
+                            <span id="importPercent">-</span>
+                            <span id="importTargetPrice">-</span>
+                        </div>
                     </div>
                 </div>
                 <form>
                     <label for="stockUrl">网址&nbsp;<span class="warn">*</span></label>
                     <input type="text" id="stockUrl" placeholder="网址">
-                    <div class="container-split">
-                        <div>
-                            <label for="stockName">名称</label>
-                            <input type="text" id="stockName" placeholder="股票名称">
+                    <label for="stockName">名称</label>
+                    <input type="text" id="stockName" placeholder="股票名称">
+                    <div class="target-group">
+                        <label>当日目标涨跌幅(%)</label>
+                        <div class="target-percent-div">
+                            &le;<input type="number" id="targetPercentLe"><input type="number" id="dailyLePriceInput"
+                                class="target-price-input" step="0.01" title="目标价，与涨跌幅联动">
+                            &ge;<input type="number" id="targetPercentGe"><input type="number" id="dailyGePriceInput"
+                                class="target-price-input" step="0.01" title="目标价，与涨跌幅联动">
                         </div>
-                        <div>
-                            <label>目标涨跌幅(%)</label>
-                            <div class="target-percent-div">
-                                &le;<input type="number" id="targetPercentLe">
-                                &ge;<input type="number" id="targetPercentGe">
-                            </div>
+                    </div>
+                    <div class="target-group">
+                        <label>导入以来目标涨跌幅(%)</label>
+                        <div class="target-percent-div">
+                            &le;<input type="number" id="importTargetPercentLe"><input type="number"
+                                id="importLePriceInput" class="target-price-input" step="0.01" title="目标价，与涨跌幅联动">
+                            &ge;<input type="number" id="importTargetPercentGe"><input type="number"
+                                id="importGePriceInput" class="target-price-input" step="0.01" title="目标价，与涨跌幅联动">
                         </div>
                     </div>
                     <div class="container" id="addOrDelDiv">
@@ -98,6 +150,9 @@
                         <div class="input-div" id="delDiv">
                             <input type="button" id="delStock" class="save-input del-embossed" value="删除">
                         </div>
+                    </div>
+                    <div class="input-div trash-toggle-div" id="trashToggleDiv" style="display:none;">
+                        <input type="button" id="trashToggleBtn" class="save-input trash-embossed" value="加入垃圾池">
                     </div>
 
                 </form>
