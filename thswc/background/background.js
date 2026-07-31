@@ -1,5 +1,9 @@
 import { stripSign } from '../shared/utils.js';
 
+// 诊断日志开关：排查完成后置 false 可停止周期性刷屏
+const DEBUG = false;
+const dbg = (...args) => { if (DEBUG) console.log('[thswc:bg]', ...args); };
+
 // 后台服务worker，处理定时刷新逻辑
 let refreshInterval = 30; // 默认30秒
 let selectorName = '';
@@ -63,7 +67,7 @@ chrome.action.onClicked.addListener(() => {
                             url: chrome.runtime.getURL('popup.html'),
                             type: 'popup',
                             width: 706,
-                            height: 490 + Math.max(rows - 2, 0) * 56,
+                            height: 492 + Math.max(rows - 2, 0) * 56,
                             left: currentWindow.width - 400,
                             top: 50
                         }, (newWindow) => {
@@ -200,7 +204,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         sendResponse({ status: 'ok' });
     } else if (request.type === 'DOCUMENT_CAPTURED') {
-        console.log('[thswc:bg] 收到抓取, popupPort 已连接=' + !!popupPort, request.documentData.url);
+        dbg('收到抓取, popupPort 已连接=' + !!popupPort, request.documentData.url);
         if (popupPort) {
             popupPort.postMessage(request);
         }
@@ -253,7 +257,7 @@ function scheduleStockAlarms() {
         const urls = (stockList || [])
             .filter(item => !item.stopRunning && (v === 'trash' ? item.inTrash : !item.inTrash))
             .map(item => item.url);
-        console.log('[thswc:bg] 排程刷新:', v, '视图下共', urls.length, '只', urls);
+        dbg('排程刷新:', v, '视图下共', urls.length, '只', urls);
         let delay = 0;
         urls.forEach(url => {
             delay += getRandomTime();
@@ -275,12 +279,12 @@ function refreshStockTab(url) {
     }
     chrome.tabs.query(query, (tabs) => {
         const target = tabs.find(t => stripSign(t.url) === stripSign(url));
-        console.log('[thswc:bg] 刷新匹配:', url, '| 同站标签', tabs.length, '个 →',
+        dbg('刷新匹配:', url, '| 同站标签', tabs.length, '个 →',
             target ? ('重载已有标签 ' + target.url) : '无匹配标签，新开');
         if (target) {
             chrome.tabs.reload(target.id);
         } else {
-            chrome.tabs.create({ url: url });
+            chrome.tabs.create({ url: url, active: false }); // 后台打开，不抢焦点
         }
     });
 }

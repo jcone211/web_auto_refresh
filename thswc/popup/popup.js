@@ -8,7 +8,24 @@ import { renderStock, renderPagination, renderSortToggles, renderComboSwitches }
 import { createEditForm } from './editform.js';
 
 const mutex = new Mutex();
-const port = chrome.runtime.connect({ name: 'popup-connection' });
+
+// service worker 回收/重启会断开长连接：自动重连，避免弹窗静默停更；
+// 扩展上下文失效（重载扩展）时 connect 抛错即停止重连，重开弹窗恢复
+let port = null;
+function connectPort() {
+    try {
+        port = chrome.runtime.connect({ name: 'popup-connection' });
+    } catch {
+        return;
+    }
+    port.onMessage.addListener(handleCaptured);
+    port.onDisconnect.addListener(() => setTimeout(connectPort, 500));
+}
+connectPort();
+
+// 诊断日志开关：置 false 可停止逐次抓取的 info 刷屏（warn/error 始终保留）
+const DEBUG = true;
+const dbg = (...args) => { if (DEBUG) console.log('[thswc:popup]', ...args); };
 
 // ---------------- 模块状态 ----------------
 let selectorName = '';
@@ -117,12 +134,12 @@ function refreshCombos() {
 }
 
 // ---------------- 抓取处理 ----------------
-port.onMessage.addListener(async (message) => {
+async function handleCaptured(message) {
     if (message.type !== 'DOCUMENT_CAPTURED') return;
     await mutex.lock();
     try {
         const messageUrl = message.documentData.url;
-        console.log('[thswc:popup] 收到抓取:', messageUrl);
+        dbg('收到抓取:', messageUrl);
         // 页面加载后 iwencai 会追加 &sign=，比较前需剔除
         const index = stockList.findIndex(item => stripSign(item.url) === stripSign(messageUrl));
         if (index === -1) {
@@ -132,7 +149,7 @@ port.onMessage.addListener(async (message) => {
         }
         const stock = stockList[index];
         if (stock.stopRunning) {
-            console.log('[thswc:popup] 该股票已停止，跳过解析:', messageUrl);
+            dbg('该股票已停止，跳过解析:', messageUrl);
             return; // 已停止：不解析、不通知
         }
 
@@ -147,7 +164,7 @@ port.onMessage.addListener(async (message) => {
             console.error('[thswc:popup] 解析失败/名称为空（选择器可能已失效）:', messageUrl, '| 选择器:', JSON.stringify(selector));
             return;
         }
-        console.log('[thswc:popup] 解析成功:', key, JSON.stringify(parsed));
+        dbg('解析成功:', key, JSON.stringify(parsed));
         stock.name = parsed.name;
         if (parsed.code) stock.code = parsed.code;
         if (parsed.prefix) stock.prefix = parsed.prefix;
@@ -168,7 +185,7 @@ port.onMessage.addListener(async (message) => {
     } finally {
         mutex.unlock();
     }
-});
+}
 
 // ---------------- 列表渲染 ----------------
 function getViewList() {
@@ -205,12 +222,19 @@ function renderStockList() {
             onStop: () => { stock.stopRunning = !stock.stopRunning; saveAndRender(); },
             onTogglePin: (s) => {
                 if (s.pinned) {
+                    // 取消置顶：移到数组首位 → 落在未置顶分组的第一位（紧随置顶分组之后）
                     s.pinned = false;
+                    s.pinOrder = null;
+                    stockList.splice(stockList.indexOf(s), 1);
+                    stockList.unshift(s);
                 } else {
-                    const viewList = stockList.filter(x => currentView === 'trash' ? x.inTrash : !x.inTrash);
-                    const orders = viewList.filter(x => x.pinned && typeof x.pinOrder === 'number').map(x => x.pinOrder);
+                    // 置顶：新置顶项排第 1，其余置顶项顺序依次 +1。
+                    // 旧置顶按现有 pinOrder 相对序重编为 2..n+1（兼容旧版负数编号），新项固定为 1
+                    stockList.filter(x => x.pinned && x !== s)
+                        .sort((a, b) => (a.pinOrder ?? 0) - (b.pinOrder ?? 0))
+                        .forEach((x, i) => { x.pinOrder = i + 2; });
                     s.pinned = true;
-                    s.pinOrder = (orders.length ? Math.min(...orders) : 0) - 1;
+                    s.pinOrder = 1;
                 }
                 saveAndRender();
             },
@@ -368,6 +392,12 @@ async function handleImport(file) {
     }
     portfolios[name] = { stockList: targetList, selectorName: importedSelector };
     await new Promise(r => chrome.storage.local.set({ portfolios }, r));
+    // 导入到当前活动组合：stockList 接管合并后的同一引用，
+    // 否则下一次抓取/保存的镜像（portfolios[active].stockList = stockList）会用旧数组冲掉合并结果
+    if (name === activePortfolio) {
+        stockList = portfolios[name].stockList;
+        renderStockList();
+    }
     // 全局恢复 interval/pageSize（选择器属组合，不动 sync.selectorName）
     if (data.settings && typeof data.settings === 'object') {
         const syncSet = {};
@@ -441,7 +471,9 @@ quickOpenEl.addEventListener('keydown', (event) => {
 startBtn.addEventListener('click', () => {
     let interval = parseInt(intervalInput.value);
     selectorName = selectorEl.value;
-    if (interval < 30) { interval = 30; intervalInput.value = 30; }
+    // 空输入/非法值会得到 NaN：NaN < 30 为 false 兜不住，NaN 周期使 alarms.create 静默失败、
+    // UI 却显示运行中。另注：正式打包环境 chrome.alarms 周期下限 1 分钟（解载开发模式 30 秒）
+    if (!Number.isFinite(interval) || interval < 30) { interval = 30; intervalInput.value = 30; }
     if (!selectorName) { alert('请选择选择器名称'); return; }
     chrome.runtime.sendMessage({ action: 'startRefresh', interval, selectorName }, (response) => {
         if (response && response.status === 'started') updateStatus(true);
@@ -457,8 +489,8 @@ stopBtn.addEventListener('click', () => {
 addStockEl.addEventListener('click', () => {
     overlayEl.style.display = 'flex';
     lastMonitorEl.style.display = '';
+    editUrl = undefined; // 须先清空：clear() 内 getStock() 依赖 editUrl，否则读到上一只股票
     editForm.clear();
-    editUrl = undefined;
     editActionsTopEl.style.display = 'none';
     stockUrlEl.disabled = false;
 });

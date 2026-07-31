@@ -6,6 +6,9 @@ if (!window.__thswcContentInjected) {
     let observer = null;
     let invalidated = false;
 
+    // 诊断日志开关：排查完成后置 false 可停止逐次抓取刷屏
+    const DEBUG = true;
+
     // 扩展重载/更新后，已注入的旧 content script 运行上下文失效：
     // 此时 chrome.runtime / sendMessage 仍存在，但调用即抛
     // "Extension context invalidated"。正确判据是 chrome.runtime.id（失效时为 undefined）。
@@ -57,7 +60,7 @@ if (!window.__thswcContentInjected) {
             }
         };
 
-        console.log('[thswc:content] 已抓取:', message.documentData.url);
+        if (DEBUG) console.log('[thswc:content] 已抓取:', message.documentData.url);
 
         try {
             chrome.runtime.sendMessage(message);

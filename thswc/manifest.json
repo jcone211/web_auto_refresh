@@ -7,11 +7,9 @@
     "storage",
     "windows",
     "alarms",
-    "idle",
     "notifications",
     "tabs",
-    "scripting",
-    "activeTab"
+    "scripting"
   ],
   "host_permissions": [
     "*://*.iwencai.com/*",
