@@ -57,6 +57,8 @@ if (!window.__thswcContentInjected) {
             }
         };
 
+        console.log('[thswc:content] 已抓取:', message.documentData.url);
+
         try {
             chrome.runtime.sendMessage(message);
         } catch (err) {

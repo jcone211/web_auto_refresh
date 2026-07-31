@@ -26,8 +26,8 @@ function getTargetPriceStr(base, le, ge) {
     return parts.length ? parts.join(' ') : '-';
 }
 
-function setPriceInput(input, base, percent) {
-    input.disabled = base == null;
+function setPriceInput(input, base, percent, alwaysEditable = false) {
+    if (!alwaysEditable) input.disabled = base == null;
     input.value = percentToTargetPrice(base, percent) ?? '';
 }
 
@@ -57,15 +57,16 @@ export function createEditForm(els, deps) {
         setPriceInput(els.dailyLePriceInputEl, dailyBase, els.targetPercentLeEl.value);
         setPriceInput(els.dailyGePriceInputEl, dailyBase, els.targetPercentGeEl.value);
         const importBase = numOrNull(els.importPriceInputEl.value);
-        setPriceInput(els.importLePriceInputEl, importBase, els.importTargetPercentLeEl.value);
-        setPriceInput(els.importGePriceInputEl, importBase, els.importTargetPercentGeEl.value);
+        // 导入目标价恒可编辑（初始价格可能尚未回填，不应阻塞设置）
+        setPriceInput(els.importLePriceInputEl, importBase, els.importTargetPercentLeEl.value, true);
+        setPriceInput(els.importGePriceInputEl, importBase, els.importTargetPercentGeEl.value, true);
     }
 
-    function bindPercentPriceLink(percentEl, priceEl, getBase) {
+    function bindPercentPriceLink(percentEl, priceEl, getBase, alwaysEditable = false) {
         percentEl.addEventListener('input', () => {
             const base = getBase();
             priceEl.value = percentToTargetPrice(base, percentEl.value) ?? '';
-            priceEl.disabled = base == null;
+            if (!alwaysEditable) priceEl.disabled = base == null;
         });
         priceEl.addEventListener('input', () => {
             percentEl.value = targetPriceToPercent(getBase(), priceEl.value) ?? '';
@@ -76,8 +77,8 @@ export function createEditForm(els, deps) {
     function bindLinkage() {
         bindPercentPriceLink(els.targetPercentLeEl, els.dailyLePriceInputEl, () => getStock()?.startPrice ?? null);
         bindPercentPriceLink(els.targetPercentGeEl, els.dailyGePriceInputEl, () => getStock()?.startPrice ?? null);
-        bindPercentPriceLink(els.importTargetPercentLeEl, els.importLePriceInputEl, () => numOrNull(els.importPriceInputEl.value));
-        bindPercentPriceLink(els.importTargetPercentGeEl, els.importGePriceInputEl, () => numOrNull(els.importPriceInputEl.value));
+        bindPercentPriceLink(els.importTargetPercentLeEl, els.importLePriceInputEl, () => numOrNull(els.importPriceInputEl.value), true);
+        bindPercentPriceLink(els.importTargetPercentGeEl, els.importGePriceInputEl, () => numOrNull(els.importPriceInputEl.value), true);
         [els.targetPercentLeEl, els.targetPercentGeEl].forEach(e => e.addEventListener('input', refreshDailyTargetText));
         [els.importTargetPercentLeEl, els.importTargetPercentGeEl].forEach(e => e.addEventListener('input', refreshImportDerived));
         els.importPriceInputEl.addEventListener('input', () => {

@@ -62,8 +62,8 @@ chrome.action.onClicked.addListener(() => {
                         chrome.windows.create({
                             url: chrome.runtime.getURL('popup.html'),
                             type: 'popup',
-                            width: 704,
-                            height: 484 + Math.max(rows - 2, 0) * 56,
+                            width: 706,
+                            height: 490 + Math.max(rows - 2, 0) * 56,
                             left: currentWindow.width - 400,
                             top: 50
                         }, (newWindow) => {
@@ -200,6 +200,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         sendResponse({ status: 'ok' });
     } else if (request.type === 'DOCUMENT_CAPTURED') {
+        console.log('[thswc:bg] 收到抓取, popupPort 已连接=' + !!popupPort, request.documentData.url);
         if (popupPort) {
             popupPort.postMessage(request);
         }
@@ -252,6 +253,7 @@ function scheduleStockAlarms() {
         const urls = (stockList || [])
             .filter(item => !item.stopRunning && (v === 'trash' ? item.inTrash : !item.inTrash))
             .map(item => item.url);
+        console.log('[thswc:bg] 排程刷新:', v, '视图下共', urls.length, '只', urls);
         let delay = 0;
         urls.forEach(url => {
             delay += getRandomTime();
@@ -262,10 +264,19 @@ function scheduleStockAlarms() {
 
 // 刷新（或新打开）单只股票的标签页
 function refreshStockTab(url) {
-    chrome.tabs.query({ url: url }, (tabs) => {
-        // query 的 url 参数按 match pattern 语义匹配、不区分 query string，
-        // 各股票 path 相同会互相命中，需按完整 URL 精确过滤
+    // tabs.query 的 url 按 match pattern 匹配，query string 也参与比较：
+    // 问财标签页地址携带 sign= 时间戳，按存储的无 sign URL 精确查询必然 0 命中，
+    // 导致每个周期都误开新标签。故按同站 origin/* 粗查，再用剔 sign 的 URL 精确过滤。
+    let query;
+    try {
+        query = { url: new URL(url).origin + '/*' };
+    } catch {
+        query = {};
+    }
+    chrome.tabs.query(query, (tabs) => {
         const target = tabs.find(t => stripSign(t.url) === stripSign(url));
+        console.log('[thswc:bg] 刷新匹配:', url, '| 同站标签', tabs.length, '个 →',
+            target ? ('重载已有标签 ' + target.url) : '无匹配标签，新开');
         if (target) {
             chrome.tabs.reload(target.id);
         } else {

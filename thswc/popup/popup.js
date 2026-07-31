@@ -122,11 +122,19 @@ port.onMessage.addListener(async (message) => {
     await mutex.lock();
     try {
         const messageUrl = message.documentData.url;
+        console.log('[thswc:popup] 收到抓取:', messageUrl);
         // 页面加载后 iwencai 会追加 &sign=，比较前需剔除
         const index = stockList.findIndex(item => stripSign(item.url) === stripSign(messageUrl));
-        if (index === -1) return;
+        if (index === -1) {
+            console.warn('[thswc:popup] URL 匹配失败!\n  来址(剔sign):', stripSign(messageUrl),
+                '\n  已存列表:', stockList.map(s => ({ 原始: s.url, 剔sign: stripSign(s.url) })));
+            return;
+        }
         const stock = stockList[index];
-        if (stock.stopRunning) return; // 已停止：不解析、不通知
+        if (stock.stopRunning) {
+            console.log('[thswc:popup] 该股票已停止，跳过解析:', messageUrl);
+            return; // 已停止：不解析、不通知
+        }
 
         if (!message.documentData.html) return;
         const doc = new DOMParser().parseFromString(message.documentData.html, 'text/html');
@@ -136,9 +144,10 @@ port.onMessage.addListener(async (message) => {
         if (!selector) return;
         const parsed = key === 'wc1' ? parseWc1(doc, selector) : parseXq1(doc, selector);
         if (!parsed) {
-            console.error('解析失败/名称为空', messageUrl);
+            console.error('[thswc:popup] 解析失败/名称为空（选择器可能已失效）:', messageUrl, '| 选择器:', JSON.stringify(selector));
             return;
         }
+        console.log('[thswc:popup] 解析成功:', key, JSON.stringify(parsed));
         stock.name = parsed.name;
         if (parsed.code) stock.code = parsed.code;
         if (parsed.prefix) stock.prefix = parsed.prefix;
@@ -390,10 +399,10 @@ function closeModal() {
 }
 
 function updateStatus(isActive) {
-    startBtn.disabled = !isActive;
-    startBtn.style.cursor = isActive ? 'default' : 'pointer';
-    stopBtn.disabled = isActive;
-    stopBtn.style.cursor = isActive ? 'pointer' : 'default';
+    startBtn.disabled = isActive;
+    startBtn.classList.toggle('active', !isActive);
+    stopBtn.disabled = !isActive;
+    stopBtn.classList.toggle('active', isActive);
 }
 
 // ---------------- 事件接线 ----------------

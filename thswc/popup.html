@@ -34,17 +34,17 @@
         <div class="container toolbar">
             <div class="view-header">
                 <h3 id="viewTitle">股票列表</h3>
-                <div class="view-toggles">
-                    <button id="viewListBtn" class="view-toggle-btn tool-btn active">股票</button>
-                    <button id="viewTrashBtn" class="view-toggle-btn tool-btn">垃圾池</button>
+                <div class="switch-group">
+                    <button id="viewListBtn" class="tool-btn active">股票</button>
+                    <button id="viewTrashBtn" class="tool-btn">垃圾池</button>
                 </div>
             </div>
             <div class="container toolbar-actions">
-                <div class="btn-container">
-                    <button id="startBtn" class="tool-btn">开始</button>
+                <div class="create-link tool-btn" id="addStock">+</div>
+                <div class="switch-group">
+                    <button id="startBtn" class="tool-btn active">开始</button>
                     <button id="stopBtn" class="tool-btn" disabled>停止</button>
                 </div>
-                <div class="create-link tool-btn" id="addStock">+</div>
             </div>
         </div>
         <div class="stock-table-container">
@@ -139,13 +139,13 @@
                             <div class="target-percent-div">
                                 <div class="tp-row">
                                     <span class="tp-sym">&le;</span>
-                                    <input type="number" id="targetPercentLe">
+                                    <input type="number" id="targetPercentLe" class="tp-percent">
                                     <input type="number" id="dailyLePriceInput" class="target-price-input" step="0.01"
                                         title="目标价，与涨跌幅联动">
                                 </div>
                                 <div class="tp-row">
                                     <span class="tp-sym">&ge;</span>
-                                    <input type="number" id="targetPercentGe">
+                                    <input type="number" id="targetPercentGe" class="tp-percent">
                                     <input type="number" id="dailyGePriceInput" class="target-price-input" step="0.01"
                                         title="目标价，与涨跌幅联动">
                                 </div>
@@ -156,13 +156,13 @@
                             <div class="target-percent-div">
                                 <div class="tp-row">
                                     <span class="tp-sym">&le;</span>
-                                    <input type="number" id="importTargetPercentLe">
+                                    <input type="number" id="importTargetPercentLe" class="tp-percent">
                                     <input type="number" id="importLePriceInput" class="target-price-input" step="0.01"
                                         title="目标价，与涨跌幅联动">
                                 </div>
                                 <div class="tp-row">
                                     <span class="tp-sym">&ge;</span>
-                                    <input type="number" id="importTargetPercentGe">
+                                    <input type="number" id="importTargetPercentGe" class="tp-percent">
                                     <input type="number" id="importGePriceInput" class="target-price-input" step="0.01"
                                         title="目标价，与涨跌幅联动">
                                 </div>
