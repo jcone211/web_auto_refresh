@@ -48,6 +48,20 @@ body {
   justify-content: space-between;
 }
 
+/* 工具栏：左对齐成一排，消除中间空洞 */
+.toolbar {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.toolbar-actions {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
 .container-split {
   display: flex;
   gap: 20px;
@@ -69,9 +83,8 @@ body {
 
 .btn-container {
   display: flex;
-  justify-content: space-between;
-  gap: 2px;
-  margin-right: 14px;
+  justify-content: flex-start;
+  gap: 6px;
 }
 
 .small-input {
@@ -89,12 +102,11 @@ input {
   padding: 6px;
   box-sizing: border-box;
 }
+
+/* 统一工具栏按钮尺寸（开始/停止/视图切换/添加） */
 button {
-  width: 40px;
-  height: 18px;
   box-sizing: border-box;
   text-align: center;
-  line-height: 18px;
 }
 
 button {
@@ -108,6 +120,17 @@ button:disabled {
   background-color: #cccccc;
 }
 
+.tool-btn {
+  width: auto;
+  height: 26px;
+  padding: 0 12px;
+  line-height: 24px;
+  font-size: 13px;
+  border-radius: 3px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
 .edit {
   width: 18px;
   height: auto;
@@ -119,14 +142,27 @@ button:disabled {
   transition: transform 0.2s;
 }
 
+/* 添加按钮：与工具栏按钮同尺寸的 pill */
 .create-link {
-  width: 14px;
-  height: 14px;
-  border: 2px solid #4caf50;
-  border-radius: 2px;
-  box-shadow: 0 0 2px rgba(0, 255, 255, 0.3);
-  text-align: center;
+  width: auto;
+  height: 26px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #4caf50;
+  border-radius: 3px;
+  background: none;
+  color: #4caf50;
+  font-size: 18px;
+  line-height: 1;
+  box-sizing: border-box;
   cursor: pointer;
+}
+
+.create-link:hover {
+  background: #4caf50;
+  color: #fff;
 }
 
 .warn {
@@ -202,31 +238,76 @@ button:disabled {
 .stock-model form {
   display: flex;
   flex-direction: column;
-  margin-top: 20px;
+  margin-top: 12px;
 }
 
 .stock-model form input {
   margin-bottom: 5px;
 }
 
-.target-percent-div {
-  width: 100%;
+/* 身份头：名称 + 代码 + 创建时间 */
+.stock-identity {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  row-gap: 4px;
-  gap: 5px;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.stock-identity input {
+  flex: 1 1 auto;
+  width: auto;
+  margin: 0;
+  min-width: 0;
+}
+
+.code-tag {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  background: #f0f2f5;
+  color: #555;
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.created-at {
+  flex: 0 0 auto;
+  color: #999;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 目标涨跌幅：2 列 grid，输入撑满不偏左 */
+.target-percent-div {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
   font-size: large;
 }
 
-.target-percent-div input {
-  width: 64px;
+.tp-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tp-row input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  margin-bottom: 0;
+}
+
+.tp-sym {
+  flex: 0 0 auto;
+  font-size: large;
 }
 
 .last-monitor {
   padding: 10px;
   border-radius: 4px;
-  margin: 14px 0 20px;
+  margin: 0 0 12px;
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
 }
 
@@ -286,13 +367,31 @@ button:disabled {
   white-space: nowrap;
 }
 
-.stock-table td:first-child > span {
+/* 操作列居中 */
+.stock-table td:last-child {
+  text-align: center;
+}
+
+.action-icons {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stock-link {
+  color: #1a73e8;
+  text-decoration: none;
+  cursor: pointer;
   display: inline-block;
   max-width: calc(100% - 22px);
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.stock-link:hover {
+  text-decoration: underline;
 }
 
 /* 涨跌幅颜色 */
@@ -304,13 +403,6 @@ button:disabled {
   color: #00b894; /* 绿色表示下跌 */
 }
 
-.input-div {
-  display: flex;
-  justify-content: center;
-  margin-top: 20px;
-  width: 45%;
-}
-
 .save-input {
   padding: 8px 16px;
   border: none;
@@ -320,34 +412,58 @@ button:disabled {
   cursor: pointer;
   transition: all 0.3s ease;
   width: 100%;
+  box-sizing: border-box;
 }
 
-.input-div.single {
+/* 编辑弹窗按钮：上排(删除+垃圾池) 下排(保存) */
+.edit-actions-top {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.edit-actions-top .save-input {
   flex: 1;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
 }
 
-.btn-embossed .del-embossed {
-  background: #fff;
-  color: #333;
-  border: 1px solid #e5e5e5;
-  box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.05);
+.edit-actions-bottom {
+  margin-top: 10px;
+}
+
+.edit-actions-bottom .save-input {
+  width: 100%;
+  height: 34px;
+}
+
+.btn-embossed {
+  background: #4caf50;
+  color: #fff;
 }
 
 .btn-embossed:hover {
-  background: #f8f9fa;
-  box-shadow: 0 3px 6px 0 rgba(0, 0, 0, 0.15), inset 0 -2px 0 rgba(0, 0, 0, 0.1);
+  background: #43a047;
+}
+
+.del-embossed {
+  background: #fff;
+  color: #fb0000;
+  border: 1px solid #fb0000;
 }
 
 .del-embossed:hover {
   background: #fb0000;
-  box-shadow: 0 3px 6px 0 rgba(0, 0, 0, 0.15), inset 0 -2px 0 rgba(0, 0, 0, 0.1);
+  color: #fff;
 }
 
-.btn-embossed:active {
+.btn-embossed:active,
+.del-embossed:active {
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-/* 表格页脚：左分页、右导入导出 */
+/* 表格页脚：左导入导出+组合，右分页 */
 .table-footer {
   display: flex;
   align-items: center;
@@ -362,6 +478,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .io-btn {
@@ -382,6 +499,39 @@ button:disabled {
   color: #4caf50;
 }
 
+/* 组合切换 chip */
+.combo-switches {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.combo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: normal;
+  cursor: pointer;
+  user-select: none;
+  margin: 0;
+}
+
+.combo-chip input {
+  width: auto;
+  margin: 0;
+}
+
+.combo-chip.active {
+  border-color: #4caf50;
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
 /* 视图切换（股票列表 / 垃圾池） */
 .view-header {
   display: flex;
@@ -399,15 +549,9 @@ button:disabled {
 }
 
 .view-toggle-btn {
-  width: auto;
-  height: auto;
-  padding: 2px 10px;
   background: none;
   border: 1px solid #4caf50;
   color: #4caf50;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 12px;
 }
 
 .view-toggle-btn.active {
@@ -501,6 +645,15 @@ button:disabled {
   font-size: 14px;
 }
 
+/* 股价提醒分组内的目标行不需要额外外边距 */
+.alert-section .target-group {
+  margin-bottom: 8px;
+}
+
+.alert-section .target-group:last-child {
+  margin-bottom: 0;
+}
+
 /* 详情页内联数字输入框 */
 .inline-number-input {
   width: 100%;
@@ -513,8 +666,6 @@ button:disabled {
 
 /* 目标价联动输入框 */
 .target-price-input {
-  width: 64px;
-  margin-left: 2px;
   padding: 4px;
   font-size: 13px;
   color: #666;
@@ -525,17 +676,7 @@ button:disabled {
   color: #bbb;
 }
 
-/* 目标涨跌幅整行（全宽，避免输入框溢出弹窗） */
-.target-group {
-  margin-bottom: 6px;
-}
-
-/* 垃圾池按钮 */
-.trash-toggle-div {
-  width: 100%;
-  margin-top: 10px;
-}
-
+/* 垃圾池按钮（橙色） */
 .trash-embossed {
   background: #fff;
   color: #e67e22;

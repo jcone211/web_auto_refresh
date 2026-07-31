@@ -19,7 +19,10 @@
     <div class="form-group container">
         <div>
             <label for="selectorName"><span>选择器名称&nbsp;<span class="warn">*</span></span></label>
-            <input type="text" class="small-input" id="selectorName">
+            <select class="small-input" id="selectorName">
+                <option value="wc1">同花顺问财</option>
+                <option value="xq1">雪球</option>
+            </select>
         </div>
         <div>
             <label for="interval">刷新间隔(秒)&nbsp;<span class="warn">*</span></label>
@@ -28,31 +31,31 @@
 
     </div>
     <div class="form-group">
-        <div class="container">
+        <div class="container toolbar">
             <div class="view-header">
                 <h3 id="viewTitle">股票列表</h3>
                 <div class="view-toggles">
-                    <button id="viewListBtn" class="view-toggle-btn active">股票</button>
-                    <button id="viewTrashBtn" class="view-toggle-btn">垃圾池</button>
+                    <button id="viewListBtn" class="view-toggle-btn tool-btn active">股票</button>
+                    <button id="viewTrashBtn" class="view-toggle-btn tool-btn">垃圾池</button>
                 </div>
             </div>
-            <div class="container">
+            <div class="container toolbar-actions">
                 <div class="btn-container">
-                    <button id="startBtn">开始</button>
-                    <button id="stopBtn" disabled>停止</button>
+                    <button id="startBtn" class="tool-btn">开始</button>
+                    <button id="stopBtn" class="tool-btn" disabled>停止</button>
                 </div>
-                <div class="create-link" id="addStock">+</div>
+                <div class="create-link tool-btn" id="addStock">+</div>
             </div>
         </div>
         <div class="stock-table-container">
             <table class="stock-table">
                 <colgroup>
+                    <col style="width:20%">
+                    <col style="width:13%">
+                    <col style="width:12%">
+                    <col style="width:12%">
                     <col style="width:24%">
-                    <col style="width:13%">
-                    <col style="width:13%">
-                    <col style="width:13%">
-                    <col style="width:22%">
-                    <col style="width:15%">
+                    <col style="width:19%">
                 </colgroup>
                 <thead>
                     <tr>
@@ -77,6 +80,7 @@
                 <button id="exportBtn" class="io-btn">导出</button>
                 <button id="importBtn" class="io-btn">导入</button>
                 <input type="file" id="importFileInput" accept=".json,application/json" style="display:none">
+                <span id="comboSwitches" class="combo-switches"></span>
             </div>
             <div id="paginationBar" class="pagination-bar"></div>
         </div>
@@ -87,6 +91,11 @@
         <div id="stockModel" class="stock-model">
             <div class="close-btn">x</div>
             <div class="stock-model-body">
+                <div class="stock-identity">
+                    <input type="text" id="stockName" placeholder="股票名称">
+                    <span id="stockCode" class="code-tag">-</span>
+                    <span id="stockCreatedAt" class="created-at">-</span>
+                </div>
                 <div class="last-monitor" id="lastMonitor">
                     <div class="detail-section">
                         <h5>当日情况</h5>
@@ -123,43 +132,55 @@
                 <form>
                     <label for="stockUrl">网址&nbsp;<span class="warn">*</span></label>
                     <input type="text" id="stockUrl" placeholder="网址">
-                    <label for="stockName">名称</label>
-                    <input type="text" id="stockName" placeholder="股票名称">
-                    <div class="target-group">
-                        <label>当日目标涨跌幅(%)</label>
-                        <div class="target-percent-div">
-                            &le;<input type="number" id="targetPercentLe"><input type="number" id="dailyLePriceInput"
-                                class="target-price-input" step="0.01" title="目标价，与涨跌幅联动">
-                            &ge;<input type="number" id="targetPercentGe"><input type="number" id="dailyGePriceInput"
-                                class="target-price-input" step="0.01" title="目标价，与涨跌幅联动">
+                    <div class="detail-section alert-section">
+                        <h5>股价提醒（满足任一即通知）</h5>
+                        <div class="target-group">
+                            <label>当日目标涨跌幅(%)</label>
+                            <div class="target-percent-div">
+                                <div class="tp-row">
+                                    <span class="tp-sym">&le;</span>
+                                    <input type="number" id="targetPercentLe">
+                                    <input type="number" id="dailyLePriceInput" class="target-price-input" step="0.01"
+                                        title="目标价，与涨跌幅联动">
+                                </div>
+                                <div class="tp-row">
+                                    <span class="tp-sym">&ge;</span>
+                                    <input type="number" id="targetPercentGe">
+                                    <input type="number" id="dailyGePriceInput" class="target-price-input" step="0.01"
+                                        title="目标价，与涨跌幅联动">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="target-group">
+                            <label>导入以来目标涨跌幅(%)</label>
+                            <div class="target-percent-div">
+                                <div class="tp-row">
+                                    <span class="tp-sym">&le;</span>
+                                    <input type="number" id="importTargetPercentLe">
+                                    <input type="number" id="importLePriceInput" class="target-price-input" step="0.01"
+                                        title="目标价，与涨跌幅联动">
+                                </div>
+                                <div class="tp-row">
+                                    <span class="tp-sym">&ge;</span>
+                                    <input type="number" id="importTargetPercentGe">
+                                    <input type="number" id="importGePriceInput" class="target-price-input" step="0.01"
+                                        title="目标价，与涨跌幅联动">
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="target-group">
-                        <label>导入以来目标涨跌幅(%)</label>
-                        <div class="target-percent-div">
-                            &le;<input type="number" id="importTargetPercentLe"><input type="number"
-                                id="importLePriceInput" class="target-price-input" step="0.01" title="目标价，与涨跌幅联动">
-                            &ge;<input type="number" id="importTargetPercentGe"><input type="number"
-                                id="importGePriceInput" class="target-price-input" step="0.01" title="目标价，与涨跌幅联动">
-                        </div>
-                    </div>
-                    <div class="container" id="addOrDelDiv">
-                        <div class="input-div" id="addDiv">
-                            <input type="button" id="saveStock" class="save-input btn-embossed" value="保存">
-                        </div>
-                        <div class="input-div" id="delDiv">
-                            <input type="button" id="delStock" class="save-input del-embossed" value="删除">
-                        </div>
-                    </div>
-                    <div class="input-div trash-toggle-div" id="trashToggleDiv" style="display:none;">
+                    <div class="edit-actions-top" id="editActionsTop">
+                        <input type="button" id="delStock" class="save-input del-embossed" value="删除">
                         <input type="button" id="trashToggleBtn" class="save-input trash-embossed" value="加入垃圾池">
                     </div>
-
+                    <div class="edit-actions-bottom">
+                        <input type="button" id="saveStock" class="save-input btn-embossed" value="保存">
+                    </div>
                 </form>
             </div>
         </div>
 
-        <script type="module" src="./popup.js"></script>
+        <script type="module" src="./popup/popup.js"></script>
 </body>
 
 </html>

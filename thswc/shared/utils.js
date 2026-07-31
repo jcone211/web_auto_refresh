@@ -78,3 +78,58 @@ export class Mutex {
         }
     }
 }
+
+// 由 url 域名映射选择器键：问财→wc1，雪球→xq1，否则 null
+export function selectorKeyForUrl(url) {
+    if (!url) return null;
+    try {
+        const { hostname } = new URL(url);
+        if (hostname === 'iwencai.com' || hostname.endsWith('.iwencai.com')) return 'wc1';
+        if (hostname === 'xueqiu.com' || hostname.endsWith('.xueqiu.com')) return 'xq1';
+    } catch {
+        return null;
+    }
+}
+
+// 去掉 url 中的 sign 参数（问财页面加载后会自动追加 &sign=时间戳）
+export function stripSign(url) {
+    if (!url) return url;
+    try {
+        const u = new URL(url);
+        u.searchParams.delete('sign');
+        return u.href;
+    } catch {
+        return url;
+    }
+}
+
+// 时间戳(ms) → YYYY-MM-DD HH:mm，无效返回 '-'
+export function formatDateTime(ts) {
+    const n = Number(ts);
+    if (!Number.isFinite(n) || n <= 0) return '-';
+    const d = new Date(n);
+    const p = x => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// wc1：从形如 001309.SZ / SZ001309 / (001309.SZ) 的文本提取 code 与 prefix
+export function extractCodePrefixFromDot(text) {
+    if (!text) return { code: '', prefix: '' };
+    const code = (text.match(/\d+/) || [''])[0];
+    const prefix = (text.match(/[A-Za-z]+/) || [''])[0];
+    return { code, prefix };
+}
+
+// xq1：从形如 德明利(SZ:001309) 的文本提取 name/code/prefix，失败返回 null
+export function parseXqStockName(text) {
+    if (!text) return null;
+    const m = text.match(/^\s*([^(（]+?)[(（]\s*([A-Za-z]+)\s*[:：]\s*(\d+)\s*[)）]/);
+    if (!m) return null;
+    return { name: m[1].trim(), prefix: m[2].toUpperCase(), code: m[3] };
+}
+
+// 清洗价格/涨跌幅文本中的货币符号、千分位逗号等，仅保留数字与正负号小数点
+export function cleanNumberText(text) {
+    if (text === null || text === undefined) return '';
+    return String(text).replace(/[^\d.\-+]/g, '');
+}

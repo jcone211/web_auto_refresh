@@ -1,3 +1,5 @@
+import { stripSign } from '../shared/utils.js';
+
 // 后台服务worker，处理定时刷新逻辑
 let refreshInterval = 30; // 默认30秒
 let selectorName = '';
@@ -20,20 +22,21 @@ chrome.runtime.onConnect.addListener((port) => {
 
 // 监听标签页更新，动态注入脚本
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status !== 'complete' || !isIwencaiUrl(tab.url)) return;
+    if (changeInfo.status !== 'complete' || !isMonitoredUrl(tab.url)) return;
 
     chrome.scripting.executeScript({
         target: { tabId },
-        files: ['content.js']
+        files: ['content/content.js']
     }).catch(err => console.error('脚本执行失败:', err));
 });
 
-function isIwencaiUrl(url) {
+function isMonitoredUrl(url) {
     if (!url) return false;
 
     try {
         const { hostname } = new URL(url);
-        return hostname === 'iwencai.com' || hostname.endsWith('.iwencai.com');
+        return hostname === 'iwencai.com' || hostname.endsWith('.iwencai.com')
+            || hostname === 'xueqiu.com' || hostname.endsWith('.xueqiu.com');
     } catch {
         return false;
     }
@@ -49,9 +52,10 @@ chrome.action.onClicked.addListener(() => {
             });
         } else {
             // 分页后窗口高度按每页条数算，避免按全量股票列表撑高
-            chrome.storage.local.get(['stockList'], (localData) => {
+            chrome.storage.local.get(['stockList', 'currentView'], (localData) => {
                 chrome.storage.sync.get(['pageSize'], (syncData) => {
-                    const stockCount = (localData.stockList || []).length;
+                    const view = localData.currentView || 'list';
+                    const stockCount = (localData.stockList || []).filter(s => view === 'trash' ? s.inTrash : !s.inTrash).length;
                     const pageSize = syncData.pageSize || 10;
                     const rows = Math.min(stockCount, pageSize);
                     chrome.windows.getCurrent((currentWindow) => {
@@ -100,12 +104,21 @@ function init() {
 function ensureMigrated() {
     if (ensureMigrated.promise) return ensureMigrated.promise;
     ensureMigrated.promise = new Promise((resolve) => {
-        chrome.storage.local.get(['stockList', 'currentView'], (localResult) => {
+        chrome.storage.local.get(['stockList', 'currentView', 'portfolios', 'activePortfolio'], (localResult) => {
             if (localResult.currentView) {
                 currentView = localResult.currentView;
             }
             const finish = (list) => {
-                chrome.storage.local.set({ stockList: list }, resolve);
+                const migratedList = migrateStockFields(list);
+                // 组合迁移：若尚无 portfolios，则以当前列表 + 选择器建「默认」组合
+                if ('portfolios' in localResult) {
+                    chrome.storage.local.set({ stockList: migratedList }, resolve);
+                } else {
+                    chrome.storage.sync.get(['selectorName'], (syncSel) => {
+                        const portfolios = { '默认': { stockList: migratedList, selectorName: syncSel.selectorName || '' } };
+                        chrome.storage.local.set({ stockList: migratedList, portfolios, activePortfolio: '默认' }, resolve);
+                    });
+                }
             };
             if ('stockList' in localResult) {
                 // 已迁移过，仅补齐老数据字段
@@ -136,6 +149,11 @@ function migrateStockFields(list) {
         }
         if (!('notifiedImport' in item)) item.notifiedImport = false;
         if (!('inTrash' in item)) item.inTrash = false;
+        if (!('code' in item)) item.code = '';
+        if (!('prefix' in item)) item.prefix = '';
+        if (!('createdAt' in item)) item.createdAt = null;
+        if (!('pinned' in item)) item.pinned = false;
+        if (!('pinOrder' in item)) item.pinOrder = null;
     }
     return list;
 }
@@ -151,14 +169,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'getStatus') {
         // 等迁移完成后直接读 storage 响应，避免模块缓存滞后于 popup 的写入
         ensureMigrated().then(() => {
-            chrome.storage.local.get(['stockList'], (localResult) => {
+            chrome.storage.local.get(['stockList', 'portfolios', 'activePortfolio'], (localResult) => {
                 chrome.storage.sync.get(['refreshInterval', 'selectorName', 'pageSize'], (syncResult) => {
                     sendResponse({
                         refreshInterval: syncResult.refreshInterval,
                         selectorName: syncResult.selectorName,
                         pageSize: syncResult.pageSize || 10,
                         currentView,
-                        stockList: localResult.stockList || []
+                        stockList: localResult.stockList || [],
+                        portfolios: localResult.portfolios || {},
+                        activePortfolio: localResult.activePortfolio || '默认'
                     });
                 });
             });
@@ -245,7 +265,7 @@ function refreshStockTab(url) {
     chrome.tabs.query({ url: url }, (tabs) => {
         // query 的 url 参数按 match pattern 语义匹配、不区分 query string，
         // 各股票 path 相同会互相命中，需按完整 URL 精确过滤
-        const target = tabs.find(t => t.url === url);
+        const target = tabs.find(t => stripSign(t.url) === stripSign(url));
         if (target) {
             chrome.tabs.reload(target.id);
         } else {
