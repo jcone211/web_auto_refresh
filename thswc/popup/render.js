@@ -1,15 +1,17 @@
-import { calcImportPercent, numOrNull, selectorKeyForUrl } from '../shared/utils.js';
+import { calcImportPercent, numOrNull } from '../shared/utils.js';
 
-// 名称链接跳转：按股票自身域名（问财用名称搜索，雪球用 prefix+code）
-export function buildJumpUrl(stock) {
-    const key = selectorKeyForUrl(stock.url);
-    if (key === 'xq1' && stock.prefix && stock.code) {
-        return `https://xueqiu.com/S/${stock.prefix}${stock.code}`;
-    }
-    if (stock.name) {
-        if (key === 'xq1') {
+// 名称链接跳转：跟随当前选择器（与刷新目标一致）——
+// xq1 优先 prefix+code 拼个股页，无代码回退雪球搜索；wc1 用问财名称搜索
+export function buildJumpUrl(stock, selectorName) {
+    if (selectorName === 'xq1') {
+        if (stock.prefix && stock.code) {
+            return `https://xueqiu.com/S/${stock.prefix}${stock.code}`;
+        }
+        if (stock.name) {
             return `https://xueqiu.com/k?q=${encodeURIComponent(stock.name)}`;
         }
+    }
+    if (stock.name) {
         return `https://www.iwencai.com/screener/result?w=${encodeURIComponent(stock.name)}&querytype=stock`;
     }
     return stock.url;
@@ -36,7 +38,7 @@ export async function copyText(text, imgEl) {
 }
 
 // 渲染单行：handlers = { onEdit, onStop, onTogglePin }（无状态，行为由调用方注入）
-export function renderStock(stock, handlers) {
+export function renderStock(stock, selectorName, handlers) {
     const tr = document.createElement('tr');
 
     // 名称（可点击跳转）+ 复制图标
@@ -48,7 +50,7 @@ export function renderStock(stock, handlers) {
         link.title = '打开对应网站';
         link.addEventListener('click', (e) => {
             e.stopPropagation();
-            chrome.tabs.create({ url: buildJumpUrl(stock) });
+            chrome.tabs.create({ url: buildJumpUrl(stock, selectorName) });
         });
         nameTd.appendChild(link);
         const copyImg = document.createElement('img');

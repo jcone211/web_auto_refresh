@@ -340,6 +340,13 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* 身份头现价：涨跌配色 + 加粗，置于代码/创建时间之后 */
+.header-price {
+  flex: 0 0 auto;
+  font-size: 18px;
+  font-weight: bold;
+}
+
 /* 目标涨跌幅：单列两行（≤ 一行、≥ 一行）。
    旧版 ≤/≥ 并排导致提醒框超出弹窗宽度两倍、出现横向滚动，改为竖排 */
 .target-percent-div {
@@ -363,11 +370,17 @@ button:disabled {
   margin-bottom: 0;
 }
 
-/* 涨跌幅输入定宽居中，目标价输入占满剩余空间 */
+/* 涨跌幅输入定宽居中 */
 .tp-row .tp-percent {
   flex: 0 0 78px;
   width: 78px;
   text-align: center;
+}
+
+/* 目标价输入定宽，不再 flex 撑满整行（避免输入框过长超出弹窗） */
+.tp-row .target-price-input {
+  flex: 0 0 120px;
+  width: 120px;
 }
 
 .tp-sym {
@@ -697,6 +710,11 @@ button:disabled {
 
 .detail-section .stock-data span {
   font-size: 14px;
+}
+
+/* 详情页去掉现价列后，当日/导入以来两栏改为 3 列 */
+.last-monitor .stock-data {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 /* 股价提醒分组内的目标行不需要额外外边距 */

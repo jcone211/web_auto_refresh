@@ -95,19 +95,18 @@
                     <input type="text" id="stockName" placeholder="股票名称">
                     <span id="stockCode" class="code-tag">-</span>
                     <span id="stockCreatedAt" class="created-at">-</span>
+                    <span id="headerCurrentPrice" class="header-price">-</span>
                 </div>
                 <div class="last-monitor" id="lastMonitor">
                     <div class="detail-section">
                         <h5>当日情况</h5>
                         <div class="stock-data">
                             <span>开盘价</span>
-                            <span>现价</span>
                             <span>涨跌幅</span>
                             <span>当日目标价</span>
                         </div>
                         <div class="stock-data">
                             <span id="startPrice">-</span>
-                            <span id="currentPrice">-</span>
                             <span id="percent">-</span>
                             <span id="targetPrice">-</span>
                         </div>
@@ -116,14 +115,12 @@
                         <h5>导入以来</h5>
                         <div class="stock-data">
                             <span>初始价格</span>
-                            <span>现价</span>
                             <span>涨跌幅</span>
                             <span>导入目标价</span>
                         </div>
                         <div class="stock-data">
                             <span><input type="number" id="importPriceInput" class="inline-number-input" step="0.01"
                                     placeholder="首次抓取自动填入"></span>
-                            <span id="importCurrentPrice">-</span>
                             <span id="importPercent">-</span>
                             <span id="importTargetPrice">-</span>
                         </div>

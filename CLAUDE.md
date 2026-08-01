@@ -42,7 +42,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### thswc 特有细节
 
 - popup.js 通过 `import` 使用 `utils.js`（`getDateTime`、`Mutex`）；`Mutex` 用于串行化并发的 `DOCUMENT_CAPTURED` 处理，新增异步解析逻辑时须包在 lock/unlock 内。
-- 选择器表 `selectorsEnum`：目前只有 `wc1` 一组（对应 iwencai 结果页的名称/当前价/涨跌额/涨跌幅）。支持新版式 = 加一组枚举并在 popup.js 的处理分支中扩展。
+- 选择器表 `selectorsEnum`：`wc1`（iwencai 结果页）/ `xq1`（雪球个股页）两组。**抓取解析按抓取页域名派发**（`selectorKeyForUrl`，与下拉框无关，过渡期两站点页面都能解析）；**刷新目标与名称跳转由下拉选择器决定**：`xq1` 且股票已有 `prefix+code` 时，以 `effectiveStockUrl`（shared/utils.js）拼接雪球个股页 `https://xueqiu.com/S/<prefix><code>` 作为刷新/跳转地址（问财链接添加的股票也会改刷雪球），代码未知则回退存储 URL。选择器变更时持久化到 sync 并镜像当前组合，发 `{action:'refresh'}` 触发 background 立即重排 alarm。支持新版式 = 加一组枚举并在 popup.js 的处理分支中扩展。
 - 开盘价由 `当前价 - 涨跌额` 反推（`kpj = dqj - zdf`），页面上没有直接的开盘价字段。
 - 股票条目 `stopRunning: true` 表示不参与定时刷新，`inTrash: true` 表示在垃圾池。background 调度按 `currentView`（list/trash，持久化在 local）+ `inTrash` + `stopRunning` 三重过滤——只刷新当前视图下的股票；增删股票/切换启停发 `{action: 'refresh'}`，切换视图发 `{action: 'setView'}`。
 - 数据模型：`importPrice`（初始价格，首次抓取自动回填当前价，之后仅手动改）；`importTargetPercentLe/Ge`（导入以来目标阈值）；通知锁存 `notifiedDaily`/`notifiedImport` 相互独立，当日或导入以来任一越界即通知；导入以来涨跌幅为派生值 `(currentPrice-importPrice)/importPrice*100`，不存储。

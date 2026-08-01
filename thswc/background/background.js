@@ -1,4 +1,4 @@
-import { stripSign } from '../shared/utils.js';
+import { stripSign, effectiveStockUrl, isKnownMarketPrefix } from '../shared/utils.js';
 
 // 诊断日志开关：排查完成后置 false 可停止周期性刷屏
 const DEBUG = false;
@@ -66,7 +66,7 @@ chrome.action.onClicked.addListener(() => {
                         chrome.windows.create({
                             url: chrome.runtime.getURL('popup.html'),
                             type: 'popup',
-                            width: 706,
+                            width: 570,
                             height: 492 + Math.max(rows - 2, 0) * 56,
                             left: currentWindow.width - 400,
                             top: 50
@@ -154,7 +154,13 @@ function migrateStockFields(list) {
         if (!('notifiedImport' in item)) item.notifiedImport = false;
         if (!('inTrash' in item)) item.inTrash = false;
         if (!('code' in item)) item.code = '';
-        if (!('prefix' in item)) item.prefix = '';
+        if (!('prefix' in item)) {
+            item.prefix = '';
+        } else if (item.prefix && !isKnownMarketPrefix(item.prefix)) {
+            // 旧版正则曾把股票名里的字母（如京东方A 的 A）误存为前缀：
+            // 清空后生效地址回退存储 URL，下次抓取自动回填正确前缀
+            item.prefix = '';
+        }
         if (!('createdAt' in item)) item.createdAt = null;
         if (!('pinned' in item)) item.pinned = false;
         if (!('pinOrder' in item)) item.pinOrder = null;
@@ -190,6 +196,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true; // 异步 sendResponse
     } else if (request.action === 'refresh') {
         init();
+        // 选择器/列表可能已变更：运行中则立即按最新生效地址重排各股票 alarm
+        chrome.alarms.get('refreshTimer', (alarm) => {
+            if (!alarm) return;
+            chrome.alarms.getAll((alarms) => {
+                alarms.filter(a => a.name.startsWith(STOCK_ALARM_PREFIX))
+                    .forEach(a => chrome.alarms.clear(a.name));
+                scheduleStockAlarms();
+            });
+        });
     } else if (request.action === 'setView') {
         currentView = request.view === 'trash' ? 'trash' : 'list';
         chrome.storage.local.set({ currentView });
@@ -236,15 +251,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         scheduleStockAlarms();
     } else if (alarm.name.startsWith(STOCK_ALARM_PREFIX)) {
         const url = alarm.name.slice(STOCK_ALARM_PREFIX.length);
-        // 直接从 storage 读最新列表与视图，避免 service worker 冷启动时状态缺失
+        // 直接从 storage 读最新列表/视图/选择器，避免 service worker 冷启动时状态缺失；
+        // alarm 名里是生效地址（xq1 下可能是拼接的雪球链接），须按生效地址反查股票
         chrome.storage.local.get(['stockList', 'currentView'], ({ stockList, currentView: view }) => {
-            const v = view || 'list';
-            const stillActive = (stockList || []).some(item =>
-                item.url === url
-                && !item.stopRunning
-                && (v === 'trash' ? item.inTrash : !item.inTrash));
-            if (!stillActive) return;
-            refreshStockTab(url);
+            chrome.storage.sync.get(['selectorName'], ({ selectorName }) => {
+                const v = view || 'list';
+                const stillActive = (stockList || []).some(item =>
+                    effectiveStockUrl(item, selectorName) === url
+                    && !item.stopRunning
+                    && (v === 'trash' ? item.inTrash : !item.inTrash));
+                if (!stillActive) return;
+                refreshStockTab(url);
+            });
         });
     }
 });
@@ -253,15 +271,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // alarm 由浏览器进程托管，不随 service worker 回收而丢失，股票数量不受限
 function scheduleStockAlarms() {
     chrome.storage.local.get(['stockList', 'currentView'], ({ stockList, currentView: view }) => {
-        const v = view || 'list';
-        const urls = (stockList || [])
-            .filter(item => !item.stopRunning && (v === 'trash' ? item.inTrash : !item.inTrash))
-            .map(item => item.url);
-        dbg('排程刷新:', v, '视图下共', urls.length, '只', urls);
-        let delay = 0;
-        urls.forEach(url => {
-            delay += getRandomTime();
-            chrome.alarms.create(STOCK_ALARM_PREFIX + url, { when: Date.now() + delay });
+        chrome.storage.sync.get(['selectorName'], ({ selectorName }) => {
+            const v = view || 'list';
+            // 刷新地址按选择器生效：xq1 下已知代码的股票改刷拼接的雪球链接
+            const urls = (stockList || [])
+                .filter(item => !item.stopRunning && (v === 'trash' ? item.inTrash : !item.inTrash))
+                .map(item => effectiveStockUrl(item, selectorName));
+            dbg('排程刷新:', v, '视图下共', urls.length, '只', urls);
+            let delay = 0;
+            urls.forEach(url => {
+                delay += getRandomTime();
+                chrome.alarms.create(STOCK_ALARM_PREFIX + url, { when: Date.now() + delay });
+            });
         });
     });
 }

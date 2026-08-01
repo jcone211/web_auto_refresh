@@ -3,16 +3,14 @@ import {
     numOrNull, formatDateTime, safeDecodeUrl
 } from '../shared/utils.js';
 
-// 渲染现价单元格（相对开盘价涨跌配色）
+// 渲染身份头现价（相对开盘价涨跌配色，直接作用于容器自身）
 function renderCurrentPriceEl(container, stock) {
-    container.textContent = '';
     if (stock.startPrice && stock.currentPrice) {
-        const priceEl = document.createElement('span');
-        priceEl.className = stock.startPrice > stock.currentPrice ? 'fall' : 'rise';
-        priceEl.textContent = stock.currentPrice;
-        container.appendChild(priceEl);
+        container.textContent = stock.currentPrice;
+        container.className = 'header-price ' + (stock.startPrice > stock.currentPrice ? 'fall' : 'rise');
     } else {
         container.textContent = '-';
+        container.className = 'header-price';
     }
 }
 
@@ -94,14 +92,14 @@ export function createEditForm(els, deps) {
         els.stockCreatedAtEl.textContent = formatDateTime(stock.createdAt);
         // 网址以 UTF-8 解码形态显示，存储保持编码形态
         els.stockUrlEl.value = safeDecodeUrl(stock.url);
+        // 现价统一展示在身份头（当日/导入以来两栏不再各放一份）
+        renderCurrentPriceEl(els.headerCurrentPriceEl, stock);
         // 当日情况
         els.startPriceEl.textContent = stock.startPrice ? stock.startPrice : '-';
-        renderCurrentPriceEl(els.currentPriceEl, stock);
         const dailyVal = numOrNull(stock.percent);
         els.percentEl.textContent = dailyVal !== null ? dailyVal + '%' : '-';
         // 导入以来
         els.importPriceInputEl.value = stock.importPrice != null ? stock.importPrice : '';
-        renderCurrentPriceEl(els.importCurrentPriceEl, stock);
         refreshImportDerived();
         // 目标涨跌幅
         els.targetPercentLeEl.value = stock.targetPercentLe ? stock.targetPercentLe : '';
@@ -126,10 +124,10 @@ export function createEditForm(els, deps) {
         els.importTargetPercentGeEl.value = '';
         els.importPriceInputEl.value = '';
         els.startPriceEl.textContent = '-';
-        els.currentPriceEl.textContent = '-';
+        els.headerCurrentPriceEl.textContent = '-';
+        els.headerCurrentPriceEl.className = 'header-price';
         els.percentEl.textContent = '-';
         els.targetPriceEl.textContent = '-';
-        els.importCurrentPriceEl.textContent = '-';
         els.importPercentEl.textContent = '-';
         els.importPercentEl.className = '';
         els.importTargetPriceEl.textContent = '-';

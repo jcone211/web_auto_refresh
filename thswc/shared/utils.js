@@ -79,6 +79,15 @@ export class Mutex {
     }
 }
 
+// 按选择器决定生效刷新地址：xq1 且已知 prefix+code 时拼接雪球个股页
+// （问财链接添加的股票也改刷雪球）；否则回退存储 URL
+export function effectiveStockUrl(stock, selectorName) {
+    if (selectorName === 'xq1' && stock && stock.prefix && stock.code) {
+        return `https://xueqiu.com/S/${stock.prefix}${stock.code}`;
+    }
+    return stock ? stock.url : '';
+}
+
 // 由 url 域名映射选择器键：问财→wc1，雪球→xq1，否则 null
 export function selectorKeyForUrl(url) {
     if (!url) return null;
@@ -112,12 +121,26 @@ export function formatDateTime(ts) {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-// wc1：从形如 001309.SZ / SZ001309 / (001309.SZ) 的文本提取 code 与 prefix
+// wc1：从形如 001309.SZ / SZ001309 / 京东方A(000725.SZ) 的文本提取 code 与 prefix。
+// 按「数字.前缀」或「前缀数字」邻接结构提取，避免把名称里的字母（京东方A 的 A）误当前缀；
+// 无邻接结构时兜底只取代码，前缀须为已知交易所代号，否则留空待下次抓取回填
 export function extractCodePrefixFromDot(text) {
     if (!text) return { code: '', prefix: '' };
+    const m = text.match(/(\d{4,6})\s*[.．]\s*([A-Za-z]{2,4})|([A-Za-z]{2,4})\s*(\d{4,6})/);
+    if (m) {
+        return m[1]
+            ? { code: m[1], prefix: m[2].toUpperCase() }
+            : { code: m[4], prefix: m[3].toUpperCase() };
+    }
     const code = (text.match(/\d+/) || [''])[0];
-    const prefix = (text.match(/[A-Za-z]+/) || [''])[0];
+    const letter = (text.match(/[A-Za-z]+/) || [''])[0].toUpperCase();
+    const prefix = isKnownMarketPrefix(letter) ? letter : '';
     return { code, prefix };
+}
+
+// 已知市场前缀白名单（深交所/上交所/北交所/港交所）
+export function isKnownMarketPrefix(prefix) {
+    return /^(SZ|SH|BJ|HK)$/.test(prefix || '');
 }
 
 // xq1：从形如 德明利(SZ:001309) 的文本提取 name/code/prefix，失败返回 null

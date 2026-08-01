@@ -1,6 +1,6 @@
 import {
     Mutex, getDateTime, normalizeUrl, stripSign, numOrNull,
-    calcImportPercent, selectorKeyForUrl
+    calcImportPercent, selectorKeyForUrl, effectiveStockUrl
 } from '../shared/utils.js';
 import { parseWc1, parseXq1 } from './parsers.js';
 import { applyThresholds } from './notifications.js';
@@ -72,8 +72,8 @@ const stockUrlEl = document.getElementById('stockUrl');
 const stockNameEl = document.getElementById('stockName');
 const stockCodeEl = document.getElementById('stockCode');
 const stockCreatedAtEl = document.getElementById('stockCreatedAt');
+const headerCurrentPriceEl = document.getElementById('headerCurrentPrice');
 const startPriceEl = document.getElementById('startPrice');
-const currentPriceEl = document.getElementById('currentPrice');
 const percentEl = document.getElementById('percent');
 const targetPriceEl = document.getElementById('targetPrice');
 const targetPercentLeEl = document.getElementById('targetPercentLe');
@@ -81,7 +81,6 @@ const targetPercentGeEl = document.getElementById('targetPercentGe');
 const dailyLePriceInputEl = document.getElementById('dailyLePriceInput');
 const dailyGePriceInputEl = document.getElementById('dailyGePriceInput');
 const importPriceInputEl = document.getElementById('importPriceInput');
-const importCurrentPriceEl = document.getElementById('importCurrentPrice');
 const importPercentEl = document.getElementById('importPercent');
 const importTargetPriceEl = document.getElementById('importTargetPrice');
 const importTargetPercentLeEl = document.getElementById('importTargetPercentLe');
@@ -102,9 +101,9 @@ const sortToggleEls = document.querySelectorAll('.sort-toggle');
 
 // 编辑表单（封装渲染/清空/联动）
 const editForm = createEditForm({
-    stockNameEl, stockCodeEl, stockCreatedAtEl, stockUrlEl,
-    startPriceEl, currentPriceEl, percentEl, targetPriceEl,
-    importPriceInputEl, importCurrentPriceEl, importPercentEl, importTargetPriceEl,
+    stockNameEl, stockCodeEl, stockCreatedAtEl, stockUrlEl, headerCurrentPriceEl,
+    startPriceEl, percentEl, targetPriceEl,
+    importPriceInputEl, importPercentEl, importTargetPriceEl,
     targetPercentLeEl, targetPercentGeEl, dailyLePriceInputEl, dailyGePriceInputEl,
     importTargetPercentLeEl, importTargetPercentGeEl, importLePriceInputEl, importGePriceInputEl,
     editActionsTopEl, trashToggleBtnEl,
@@ -140,8 +139,12 @@ async function handleCaptured(message) {
     try {
         const messageUrl = message.documentData.url;
         dbg('收到抓取:', messageUrl);
+        // 匹配双目标：存储 URL 与生效 URL（xq1 下为拼接的雪球链接，过渡期两种页面都会收到）；
         // 页面加载后 iwencai 会追加 &sign=，比较前需剔除
-        const index = stockList.findIndex(item => stripSign(item.url) === stripSign(messageUrl));
+        const strippedMsg = stripSign(messageUrl);
+        const index = stockList.findIndex(item =>
+            stripSign(item.url) === strippedMsg
+            || stripSign(effectiveStockUrl(item, selectorName)) === strippedMsg);
         if (index === -1) {
             console.warn('[thswc:popup] URL 匹配失败!\n  来址(剔sign):', stripSign(messageUrl),
                 '\n  已存列表:', stockList.map(s => ({ 原始: s.url, 剔sign: stripSign(s.url) })));
@@ -217,7 +220,7 @@ function renderStockList() {
     const pageItems = list.slice((currentPage - 1) * pageSize, currentPage * pageSize);
     stockTableEl.innerHTML = '';
     for (const stock of pageItems) {
-        stockTableEl.appendChild(renderStock(stock, {
+        stockTableEl.appendChild(renderStock(stock, selectorName, {
             onEdit: () => openEdit(stock),
             onStop: () => { stock.stopRunning = !stock.stopRunning; saveAndRender(); },
             onTogglePin: (s) => {
@@ -466,6 +469,16 @@ quickOpenEl.addEventListener('keydown', (event) => {
             chrome.tabs.create({ url });
         });
     }
+});
+
+// 选择器变更：持久化并镜像到活动组合，立即按新生效地址重排刷新（名称跳转也随之更新）
+selectorEl.addEventListener('change', () => {
+    selectorName = selectorEl.value;
+    if (portfolios[activePortfolio]) portfolios[activePortfolio].selectorName = selectorName;
+    chrome.storage.sync.set({ selectorName });
+    chrome.storage.local.set({ portfolios });
+    renderStockList();
+    chrome.runtime.sendMessage({ action: 'refresh' });
 });
 
 startBtn.addEventListener('click', () => {
