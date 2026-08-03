@@ -30,7 +30,7 @@
         </div>
 
     </div>
-    <div class="form-group">
+    <div class="form-group list-panel">
         <div class="container toolbar">
             <div class="view-header">
                 <h3 id="viewTitle">股票列表</h3>
@@ -50,11 +50,11 @@
         <div class="stock-table-container">
             <table class="stock-table">
                 <colgroup>
-                    <col style="width:20%">
-                    <col style="width:13%">
-                    <col style="width:12%">
-                    <col style="width:12%">
                     <col style="width:24%">
+                    <col style="width:14%">
+                    <col style="width:13%">
+                    <col style="width:13%">
+                    <col style="width:17%">
                     <col style="width:19%">
                 </colgroup>
                 <thead>
@@ -63,10 +63,12 @@
                         <th>初始价格</th>
                         <th>开盘价</th>
                         <th>现价</th>
-                        <th>
-                            涨跌幅
-                            <span class="sort-toggle" data-field="percent" title="按当日涨跌幅排序">⇅</span>
-                            <span class="sort-toggle" data-field="importPercent" title="按导入以来涨跌幅排序">⇅</span>
+                        <th class="th-percent">
+                            <span>涨跌幅</span>
+                            <span class="sort-row">
+                                <span class="sort-toggle" data-field="percent" title="按当日涨跌幅排序">⇅</span>
+                                <span class="sort-toggle" data-field="importPercent" title="按导入以来涨跌幅排序">⇅</span>
+                            </span>
                         </th>
                         <th></th>
                     </tr>
@@ -76,30 +78,32 @@
             </table>
         </div>
         <div class="table-footer">
-            <div class="import-export-bar">
-                <button id="exportBtn" class="io-btn">导出</button>
-                <button id="importBtn" class="io-btn">导入</button>
+            <!-- 首行：持仓组合标签 + 导入导出图标 + 分页；次行组合卡片 -->
+            <div class="footer-top">
+                <span id="comboLabel" class="combo-label">持仓组合</span>
+                <button id="exportBtn" class="io-icon-btn" title="导出"><img src="icons/export.svg" alt="导出"></button>
+                <button id="importBtn" class="io-icon-btn" title="导入"><img src="icons/import.svg" alt="导入"></button>
                 <input type="file" id="importFileInput" accept=".json,application/json" style="display:none">
-                <span id="comboSwitches" class="combo-switches"></span>
+                <div id="paginationBar" class="pagination-bar"></div>
             </div>
-            <div id="paginationBar" class="pagination-bar"></div>
+            <span id="comboSwitches" class="combo-switches"></span>
         </div>
     </div>
 
     <!-- 添加编辑股票div -->
     <div class="overlay">
         <div id="stockModel" class="stock-model">
-            <div class="close-btn">x</div>
+            <div class="close-btn" title="关闭">×</div>
             <div class="stock-model-body">
                 <div class="stock-identity">
-                    <input type="text" id="stockName" placeholder="股票名称">
+                    <span id="stockName" class="stock-name">待抓取</span>
                     <span id="stockCode" class="code-tag">-</span>
-                    <span id="stockCreatedAt" class="created-at">-</span>
+                    <span class="identity-sep">-</span>
                     <span id="headerCurrentPrice" class="header-price">-</span>
                 </div>
                 <div class="last-monitor" id="lastMonitor">
                     <div class="detail-section">
-                        <h5>当日情况</h5>
+                        <h5>当日情况<span id="lastUpdateAt" class="last-update-at"></span></h5>
                         <div class="stock-data">
                             <span>开盘价</span>
                             <span>涨跌幅</span>
@@ -127,41 +131,48 @@
                     </div>
                 </div>
                 <form>
-                    <label for="stockUrl">网址&nbsp;<span class="warn">*</span></label>
-                    <input type="text" id="stockUrl" placeholder="网址">
+                    <div id="stockUrlGroup">
+                        <label for="stockUrl">网址&nbsp;<span class="warn">*</span></label>
+                        <input type="text" id="stockUrl" placeholder="网址">
+                    </div>
                     <div class="detail-section alert-section">
-                        <h5>股价提醒（满足任一即通知）</h5>
-                        <div class="target-group">
-                            <label>当日目标涨跌幅(%)</label>
+                        <div class="alert-head">
+                            <h5>股价提醒（满足任一即通知）</h5>
+                            <!-- 当日/导入以来两组阈值折叠为一组，切换填写，缩短弹窗高度 -->
+                            <div class="alert-dim-switch">
+                                <button type="button" id="alertDimDailyBtn" class="active">当日</button>
+                                <button type="button" id="alertDimImportBtn">导入以来</button>
+                            </div>
+                        </div>
+                        <div class="target-group" id="dailyTargetGroup">
                             <div class="target-percent-div">
                                 <div class="tp-row">
-                                    <span class="tp-sym">&le;</span>
-                                    <input type="number" id="targetPercentLe" class="tp-percent">
+                                    <span class="tp-sym sym-le">&le;</span>
+                                    <input type="number" id="targetPercentLe" class="tp-percent" placeholder="涨跌幅%">
                                     <input type="number" id="dailyLePriceInput" class="target-price-input" step="0.01"
-                                        title="目标价，与涨跌幅联动">
+                                        placeholder="目标价" title="目标价，与涨跌幅联动">
                                 </div>
                                 <div class="tp-row">
-                                    <span class="tp-sym">&ge;</span>
-                                    <input type="number" id="targetPercentGe" class="tp-percent">
+                                    <span class="tp-sym sym-ge">&ge;</span>
+                                    <input type="number" id="targetPercentGe" class="tp-percent" placeholder="涨跌幅%">
                                     <input type="number" id="dailyGePriceInput" class="target-price-input" step="0.01"
-                                        title="目标价，与涨跌幅联动">
+                                        placeholder="目标价" title="目标价，与涨跌幅联动">
                                 </div>
                             </div>
                         </div>
-                        <div class="target-group">
-                            <label>导入以来目标涨跌幅(%)</label>
+                        <div class="target-group" id="importTargetGroup" style="display:none">
                             <div class="target-percent-div">
                                 <div class="tp-row">
-                                    <span class="tp-sym">&le;</span>
-                                    <input type="number" id="importTargetPercentLe" class="tp-percent">
+                                    <span class="tp-sym sym-le">&le;</span>
+                                    <input type="number" id="importTargetPercentLe" class="tp-percent" placeholder="涨跌幅%">
                                     <input type="number" id="importLePriceInput" class="target-price-input" step="0.01"
-                                        title="目标价，与涨跌幅联动">
+                                        placeholder="目标价" title="目标价，与涨跌幅联动">
                                 </div>
                                 <div class="tp-row">
-                                    <span class="tp-sym">&ge;</span>
-                                    <input type="number" id="importTargetPercentGe" class="tp-percent">
+                                    <span class="tp-sym sym-ge">&ge;</span>
+                                    <input type="number" id="importTargetPercentGe" class="tp-percent" placeholder="涨跌幅%">
                                     <input type="number" id="importGePriceInput" class="target-price-input" step="0.01"
-                                        title="目标价，与涨跌幅联动">
+                                        placeholder="目标价" title="目标价，与涨跌幅联动">
                                 </div>
                             </div>
                         </div>

@@ -79,13 +79,30 @@ export class Mutex {
     }
 }
 
-// 按选择器决定生效刷新地址：xq1 且已知 prefix+code 时拼接雪球个股页
-// （问财链接添加的股票也改刷雪球）；否则回退存储 URL
+// ETF 代码 → 交易所前缀：159→深交所，51/58→上交所；非 ETF 返回 ''。
+// 问财不支持 ETF 查询，故 ETF 不论选择器一律走雪球，前缀直接由代码推导
+export function etfPrefixForCode(code) {
+    const c = String(code || '');
+    if (!/^\d{6}$/.test(c)) return '';
+    if (c.startsWith('159')) return 'SZ';
+    if (c.startsWith('51') || c.startsWith('58')) return 'SH';
+    return '';
+}
+
+// 按选择器决定生效刷新地址：
+// ETF（159/51/58）不论选择器恒刷雪球个股页；
+// 其余股票 xq1 且已知 prefix+code 时拼接雪球个股页（问财链接添加的也改刷雪球）；
+// 均不满足则回退存储 URL
 export function effectiveStockUrl(stock, selectorName) {
-    if (selectorName === 'xq1' && stock && stock.prefix && stock.code) {
+    if (!stock) return '';
+    const etfPrefix = etfPrefixForCode(stock.code);
+    if (etfPrefix) {
+        return `https://xueqiu.com/S/${etfPrefix}${stock.code}`;
+    }
+    if (selectorName === 'xq1' && stock.prefix && stock.code) {
         return `https://xueqiu.com/S/${stock.prefix}${stock.code}`;
     }
-    return stock ? stock.url : '';
+    return stock.url;
 }
 
 // 由 url 域名映射选择器键：问财→wc1，雪球→xq1，否则 null
@@ -110,6 +127,15 @@ export function stripSign(url) {
     } catch {
         return url;
     }
+}
+
+// 最新刷新时间戳(ms) → dd.MM HH:mm（不带年，如 08.04 09:30），无效返回 ''
+export function formatLastUpdate(ts) {
+    const n = Number(ts);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const d = new Date(n);
+    const p = x => String(x).padStart(2, '0');
+    return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 // 时间戳(ms) → YYYY-MM-DD HH:mm，无效返回 '-'

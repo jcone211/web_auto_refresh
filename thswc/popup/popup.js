@@ -1,6 +1,6 @@
 import {
     Mutex, getDateTime, normalizeUrl, stripSign, numOrNull,
-    calcImportPercent, selectorKeyForUrl, effectiveStockUrl
+    calcImportPercent, selectorKeyForUrl, effectiveStockUrl, etfPrefixForCode
 } from '../shared/utils.js';
 import { parseWc1, parseXq1 } from './parsers.js';
 import { applyThresholds } from './notifications.js';
@@ -69,9 +69,14 @@ const saveStockBtnEl = document.getElementById('saveStock');
 const delStockBtnEl = document.getElementById('delStock');
 const stockTableEl = document.getElementById('stockTable');
 const stockUrlEl = document.getElementById('stockUrl');
+const stockUrlGroupEl = document.getElementById('stockUrlGroup');
+const alertDimDailyBtnEl = document.getElementById('alertDimDailyBtn');
+const alertDimImportBtnEl = document.getElementById('alertDimImportBtn');
+const dailyTargetGroupEl = document.getElementById('dailyTargetGroup');
+const importTargetGroupEl = document.getElementById('importTargetGroup');
 const stockNameEl = document.getElementById('stockName');
 const stockCodeEl = document.getElementById('stockCode');
-const stockCreatedAtEl = document.getElementById('stockCreatedAt');
+const lastUpdateAtEl = document.getElementById('lastUpdateAt');
 const headerCurrentPriceEl = document.getElementById('headerCurrentPrice');
 const startPriceEl = document.getElementById('startPrice');
 const percentEl = document.getElementById('percent');
@@ -97,11 +102,12 @@ const exportBtnEl = document.getElementById('exportBtn');
 const importBtnEl = document.getElementById('importBtn');
 const importFileInputEl = document.getElementById('importFileInput');
 const comboSwitchesEl = document.getElementById('comboSwitches');
+const comboLabelEl = document.getElementById('comboLabel');
 const sortToggleEls = document.querySelectorAll('.sort-toggle');
 
 // 编辑表单（封装渲染/清空/联动）
 const editForm = createEditForm({
-    stockNameEl, stockCodeEl, stockCreatedAtEl, stockUrlEl, headerCurrentPriceEl,
+    stockNameEl, stockCodeEl, stockUrlEl, headerCurrentPriceEl, lastUpdateAtEl,
     startPriceEl, percentEl, targetPriceEl,
     importPriceInputEl, importPercentEl, importTargetPriceEl,
     targetPercentLeEl, targetPercentGeEl, dailyLePriceInputEl, dailyGePriceInputEl,
@@ -129,7 +135,9 @@ function saveAndRender() {
 }
 
 function refreshCombos() {
-    renderComboSwitches(portfolios, activePortfolio, comboSwitchesEl, switchPortfolio);
+    // 无组合时仅隐藏标签（分页仍在同行），chips 容器由渲染函数清空
+    comboLabelEl.style.display = Object.keys(portfolios).length ? '' : 'none';
+    renderComboSwitches(portfolios, activePortfolio, comboSwitchesEl, { onSwitch: switchPortfolio, onDelete: deletePortfolio });
 }
 
 // ---------------- 抓取处理 ----------------
@@ -177,6 +185,7 @@ async function handleCaptured(message) {
             if (stock.importPrice == null) stock.importPrice = parsed.currentPrice; // 初始价格首次回填
         }
         if (parsed.percent != null) stock.percent = parsed.percent;
+        stock.lastUpdateAt = message.documentData.timestamp || Date.now(); // 股票级最新刷新时间
         applyThresholds(stock);
         lastUpdateTimeEl.textContent = getDateTime();
         // 同步写回活动组合，避免切换组合时读到旧价格
@@ -286,6 +295,16 @@ function switchPortfolio(name) {
     refreshCombos();
     renderStockList();
     chrome.runtime.sendMessage({ action: 'refresh' });
+}
+
+// 删除组合：初始组合「默认」不可删；活动组合须先切走（避免活动指针悬空）；删除前 confirm 防误触
+function deletePortfolio(name) {
+    if (!portfolios[name]) return;
+    if (name === '默认') { alert('初始组合「默认」不可删除'); return; }
+    if (name === activePortfolio) { alert('当前组合使用中，请先切换到其他组合再删除'); return; }
+    if (!confirm(`删除组合「${name}」？组合内的股票快照将一并删除`)) return;
+    delete portfolios[name];
+    chrome.storage.local.set({ portfolios }, refreshCombos);
 }
 
 // ---------------- 导入 / 导出 ----------------
@@ -421,7 +440,7 @@ function openEdit(stock) {
     overlayEl.style.display = 'flex';
     lastMonitorEl.style.display = '';
     editUrl = stock.url;
-    stockUrlEl.disabled = true;
+    stockUrlGroupEl.style.display = 'none'; // 编辑页网址不可改，隐藏整组
     editForm.render(stock);
 }
 
@@ -463,9 +482,13 @@ quickOpenEl.addEventListener('keydown', (event) => {
         event.preventDefault();
         const names = quickOpenEl.value.split(/[\s,，、；;|\/]+/).filter(item => item && !/^-+$/.test(item));
         names.forEach((item) => {
-            const url = selectorName === 'xq1'
-                ? `https://xueqiu.com/k?q=${encodeURIComponent(item)}`
-                : `https://www.iwencai.com/screener/result?w=${encodeURIComponent(item)}&querytype=stock`;
+            // ETF 代码（159/51/58）问财不支持，直接开雪球个股页
+            const etfPrefix = etfPrefixForCode(item);
+            const url = etfPrefix
+                ? `https://xueqiu.com/S/${etfPrefix}${item}`
+                : selectorName === 'xq1'
+                    ? `https://xueqiu.com/k?q=${encodeURIComponent(item)}`
+                    : `https://www.iwencai.com/screener/result?w=${encodeURIComponent(item)}&querytype=stock`;
             chrome.tabs.create({ url });
         });
     }
@@ -505,13 +528,13 @@ addStockEl.addEventListener('click', () => {
     editUrl = undefined; // 须先清空：clear() 内 getStock() 依赖 editUrl，否则读到上一只股票
     editForm.clear();
     editActionsTopEl.style.display = 'none';
+    stockUrlGroupEl.style.display = ''; // 新增需填网址
     stockUrlEl.disabled = false;
 });
 
 saveStockBtnEl.addEventListener('click', () => {
     const rawUrl = stockUrlEl.value;
     if (!rawUrl) { alert('请输入网址'); return; }
-    const name = stockNameEl.value;
     const tLe = targetPercentLeEl.value;
     const tGe = targetPercentGeEl.value;
     const iLe = importTargetPercentLeEl.value;
@@ -519,7 +542,7 @@ saveStockBtnEl.addEventListener('click', () => {
     if (editUrl) {
         const item = stockList.find(s => s.url === editUrl);
         if (!item) { alert('保存失败，请关闭重试'); return; }
-        item.name = name;
+        // 名称只读（抓取自动更新），保存不回写
         item.targetPercentLe = tLe;
         item.targetPercentGe = tGe;
         item.importTargetPercentLe = iLe;
@@ -533,7 +556,7 @@ saveStockBtnEl.addEventListener('click', () => {
         if (!url) { alert('网址格式不正确'); return; }
         if (stockList.some(s => s.url === url)) { alert('网址已存在'); return; }
         stockList.push({
-            url, name, code: '', prefix: '',
+            url, name: '', code: '', prefix: '', // 名称留空，首次抓取自动回填
             startPrice: null, currentPrice: null, percent: null,
             importPrice: numOrNull(importPriceInputEl.value),
             targetPercentLe: tLe, targetPercentGe: tGe,
@@ -562,6 +585,16 @@ trashToggleBtnEl.addEventListener('click', () => {
     saveAndRender();
     closeModal();
 });
+
+// 股价提醒维度切换：当日/导入以来两组阈值折叠为一组，切换填写（两组值各自保留）
+function switchAlertDim(daily) {
+    dailyTargetGroupEl.style.display = daily ? '' : 'none';
+    importTargetGroupEl.style.display = daily ? 'none' : '';
+    alertDimDailyBtnEl.classList.toggle('active', daily);
+    alertDimImportBtnEl.classList.toggle('active', !daily);
+}
+alertDimDailyBtnEl.addEventListener('click', () => switchAlertDim(true));
+alertDimImportBtnEl.addEventListener('click', () => switchAlertDim(false));
 
 viewListBtnEl.addEventListener('click', () => switchView('list'));
 viewTrashBtnEl.addEventListener('click', () => switchView('trash'));

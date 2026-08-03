@@ -1,8 +1,13 @@
-import { calcImportPercent, numOrNull } from '../shared/utils.js';
+import { calcImportPercent, numOrNull, etfPrefixForCode } from '../shared/utils.js';
 
-// 名称链接跳转：跟随当前选择器（与刷新目标一致）——
-// xq1 优先 prefix+code 拼个股页，无代码回退雪球搜索；wc1 用问财名称搜索
+// 名称链接跳转：与刷新目标一致——
+// ETF（159/51/58）不论选择器恒跳雪球个股页（问财不支持 ETF）；
+// 其余跟随当前选择器：xq1 优先 prefix+code 拼个股页，无代码回退雪球搜索；wc1 用问财名称搜索
 export function buildJumpUrl(stock, selectorName) {
+    const etfPrefix = etfPrefixForCode(stock.code);
+    if (etfPrefix) {
+        return `https://xueqiu.com/S/${etfPrefix}${stock.code}`;
+    }
     if (selectorName === 'xq1') {
         if (stock.prefix && stock.code) {
             return `https://xueqiu.com/S/${stock.prefix}${stock.code}`;
@@ -47,7 +52,8 @@ export function renderStock(stock, selectorName, handlers) {
         const link = document.createElement('a');
         link.className = 'stock-link';
         link.textContent = stock.name;
-        link.title = '打开对应网站';
+        // hover 展示完整名称（长名称在列表被省略号截断），而非操作提示
+        link.title = stock.name;
         link.addEventListener('click', (e) => {
             e.stopPropagation();
             chrome.tabs.create({ url: buildJumpUrl(stock, selectorName) });
@@ -185,10 +191,13 @@ export function renderSortToggles(currentSort, els) {
     });
 }
 
-// 渲染组合切换 chip（单选语义：checkbox 外观，仅一个活动）
-export function renderComboSwitches(portfolios, active, container, onSwitch) {
+// 渲染组合切换 chip（单选语义：checkbox 外观，仅一个活动）；
+// handlers = { onSwitch, onDelete }，删除钮为 chip 内独立 ×
+export function renderComboSwitches(portfolios, active, container, { onSwitch, onDelete }) {
     container.innerHTML = '';
     const names = Object.keys(portfolios);
+    // 初始组合「默认」固定展示在第一位（sort 稳定，其余保持登记顺序）
+    names.sort((a, b) => (a === '默认' ? -1 : b === '默认' ? 1 : 0));
     if (names.length === 0) return;
     names.forEach(name => {
         const label = document.createElement('label');
@@ -206,6 +215,17 @@ export function renderComboSwitches(portfolios, active, container, onSwitch) {
         const txt = document.createElement('span');
         txt.textContent = name;
         label.append(cb, txt);
+        const del = document.createElement('span');
+        del.className = 'combo-del';
+        del.textContent = '×';
+        del.title = '删除组合';
+        del.addEventListener('click', (e) => {
+            // 阻止 label 默认行为，避免误触切换 checkbox
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete(name);
+        });
+        label.appendChild(del);
         container.appendChild(label);
     });
 }

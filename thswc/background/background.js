@@ -162,6 +162,7 @@ function migrateStockFields(list) {
             item.prefix = '';
         }
         if (!('createdAt' in item)) item.createdAt = null;
+        if (!('lastUpdateAt' in item)) item.lastUpdateAt = null;
         if (!('pinned' in item)) item.pinned = false;
         if (!('pinOrder' in item)) item.pinOrder = null;
     }
@@ -219,11 +220,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         sendResponse({ status: 'ok' });
     } else if (request.type === 'DOCUMENT_CAPTURED') {
-        dbg('收到抓取, popupPort 已连接=' + !!popupPort, request.documentData.url);
-        if (popupPort) {
-            popupPort.postMessage(request);
-        }
-        sendResponse({ status: 'received', forwarded: !!popupPort });
+        // 停止监控（无 refreshTimer）后，已打开标签页里的 content script 仍会因
+        // 行情页 DOM 实时变动持续上报；此时直接丢弃，不转发 popup，
+        // 否则「停止」后上次更新时间仍会随页面变动往前走
+        chrome.alarms.get('refreshTimer', (alarm) => {
+            if (!alarm) {
+                sendResponse({ status: 'ignored-not-running' });
+                return;
+            }
+            dbg('收到抓取, popupPort 已连接=' + !!popupPort, request.documentData.url);
+            if (popupPort) {
+                popupPort.postMessage(request);
+            }
+            sendResponse({ status: 'received', forwarded: !!popupPort });
+        });
+        return true; // 异步 sendResponse
     }
 });
 

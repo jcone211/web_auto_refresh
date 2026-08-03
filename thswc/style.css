@@ -1,8 +1,18 @@
+/* 预留滚动条槽位：列表/垃圾池视图行数不同，垂直滚动条出现/消失会改变内容宽度
+   （切换视图整页左右移动约一个滚动条宽），预留槽位后两视图内容宽度恒定 */
+html,
+body {
+  scrollbar-gutter: stable;
+}
+
 body {
   width: 100%;
   max-width: 680px;
   box-sizing: border-box;
-  padding: 15px;
+  /* 清除 UA 默认 8px margin（否则底部多出 8px），三边 padding 补回原视觉间距；
+     底部留 6px：列表页内容到持仓组合行下方 6px 为止 */
+  margin: 0;
+  padding: 23px 23px 6px;
   font-family: Arial, sans-serif;
   overflow-x: hidden;
 }
@@ -42,6 +52,11 @@ body {
 
 .form-group {
   margin-bottom: 20px;
+}
+
+/* 列表面板是页尾内容，底部空白由 body 的 6px 统一提供 */
+.list-panel {
+  margin-bottom: 0;
 }
 
 .container {
@@ -150,8 +165,10 @@ body {
   outline-offset: 1px;
 }
 
+/* 定高确保 select 与 number input 盒高完全一致（两者内禀行高不同） */
 .small-input {
   width: 140px;
+  height: 30px;
 }
 
 label {
@@ -160,10 +177,35 @@ label {
   font-weight: bold;
 }
 
-input {
+/* select 与 input 共用盒模型，保证同行控件高度/圆角一致 */
+input,
+select {
   width: 100%;
   padding: 6px;
   box-sizing: border-box;
+}
+
+/* 统一输入控件外观：细边框 + 圆角 + 绿色聚焦光圈（按钮/复选框除外） */
+input:not([type="button"]):not([type="checkbox"]),
+select,
+textarea {
+  border: 1px solid #dfe3e7;
+  border-radius: 4px;
+  background: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+input:not([type="button"]):not([type="checkbox"]):focus,
+select:focus,
+textarea:focus {
+  border-color: #4caf50;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.15);
+}
+
+input:not([type="button"]):not([type="checkbox"]):disabled {
+  background: #f5f6f7;
+  color: #999;
 }
 
 /* 统一工具栏按钮尺寸（开始/停止/视图切换/添加） */
@@ -250,10 +292,10 @@ button:disabled {
   background: white;
   width: 70%;
   max-height: 100%;
-  padding: 30px 20px 20px;
-  border-radius: 5px;
+  padding: 28px 20px 18px;
+  border-radius: 10px;
   position: relative;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -287,14 +329,27 @@ button:disabled {
   background: transparent;
 }
 
+/* 关闭按钮：圆形 hover 底 */
 .close-btn {
   position: absolute;
-  top: 6px;
-  right: 14px;
+  top: 8px;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
   cursor: pointer;
-  font-size: 18px;
-  font-weight: bold;
-  color: rgb(52, 52, 52);
+  font-size: 16px;
+  line-height: 1;
+  color: #999;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.close-btn:hover {
+  background: #f0f2f5;
+  color: #333;
 }
 
 .stock-model form {
@@ -307,20 +362,26 @@ button:disabled {
   margin-bottom: 5px;
 }
 
-/* 身份头：名称 + 代码 + 创建时间 */
+/* 身份头：名称 + 代码 + 现价 */
 .stock-identity {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   margin-bottom: 10px;
 }
 
-/* 名称输入框只占 1/3 宽，代码/创建时间标签随后排列 */
-.stock-identity input {
-  flex: 0 1 33%;
-  width: 33%;
-  margin: 0;
-  min-width: 0;
+/* 股票名称：只读展示（抓取自动更新），超长省略号截断；
+   min-width 保底可见字数，过大则短名称右侧留白 */
+.stock-name {
+  flex: 0 1 auto;
+  max-width: 45%;
+  min-width: 4.5em;
+  font-size: 18px;
+  font-weight: bold;
+  color: #222;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .code-tag {
@@ -333,16 +394,24 @@ button:disabled {
   white-space: nowrap;
 }
 
-.created-at {
+/* 身份头分隔符：代码与现价之间 */
+.identity-sep {
   flex: 0 0 auto;
   color: #999;
-  font-size: 12px;
-  white-space: nowrap;
 }
 
-/* 身份头现价：涨跌配色 + 加粗，置于代码/创建时间之后 */
+/* 最新刷新时间：挂在「当日情况」标题右上角，不带年 */
+.last-update-at {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: normal;
+  color: #8a919a;
+}
+
+/* 身份头现价：涨跌配色 + 加粗，紧跟创建时间之后，视觉上微下移对齐 */
 .header-price {
   flex: 0 0 auto;
+  margin-top: 4px;
   font-size: 18px;
   font-weight: bold;
 }
@@ -383,19 +452,39 @@ button:disabled {
   width: 120px;
 }
 
+/* 阈值符号徽章：≤ 跌提醒绿色、≥ 涨提醒红色 */
 .tp-sym {
   flex: 0 0 auto;
-}
-
-.last-monitor {
-  padding: 10px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 4px;
-  margin: 0 0 12px;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  font-weight: bold;
 }
 
-.last-monitor h5 {
-  margin-top: 0;
+.sym-le {
+  background: #e6f7f2;
+  color: #00b894;
+}
+
+.sym-ge {
+  background: #fdecea;
+  color: #e02424;
+}
+
+/* 当日情况/导入以来容器：不再整体套阴影，改为卡片纵向堆叠 */
+.last-monitor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.last-monitor .detail-section {
+  margin-bottom: 0;
 }
 
 /* 表格容器 */
@@ -502,7 +591,7 @@ button:disabled {
 .edit-actions-top {
   display: flex;
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 8px;
 }
 
 .edit-actions-top .save-input {
@@ -546,40 +635,51 @@ button:disabled {
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-/* 表格页脚：左导入导出+组合，右分页 */
+/* 表格页脚：首行组合标签+导入导出图标+分页，次行组合卡片 */
 .table-footer {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 2px 2px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 2px 0;
 }
 
-/* 导入导出栏 */
-.import-export-bar {
+.footer-top {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.io-btn {
-  width: auto;
-  height: auto;
-  padding: 3px 14px;
-  background: #fff;
-  color: #333;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 13px;
+/* 分页推到行尾 */
+.footer-top .pagination-bar {
+  margin-left: auto;
 }
 
-.io-btn:hover {
-  background: #f8f9fa;
-  border-color: #4caf50;
-  color: #4caf50;
+.combo-label {
+  font-size: 12px;
+  color: #8a919a;
+  white-space: nowrap;
+}
+
+/* 导入导出图标钮：持仓组合标签后 */
+.io-icon-btn {
+  width: auto;
+  height: auto;
+  padding: 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.io-icon-btn img {
+  display: block;
+  width: 16px;
+  height: 16px;
+  opacity: 0.6;
+}
+
+.io-icon-btn:hover img {
+  opacity: 1;
 }
 
 /* 组合切换 chip */
@@ -615,6 +715,20 @@ button:disabled {
   color: #2e7d32;
 }
 
+/* 组合删除钮：默认弱化，hover 变红 */
+.combo-del {
+  margin-left: 2px;
+  padding: 0 2px;
+  color: #bbb;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.combo-del:hover {
+  color: #fb0000;
+}
+
 /* 视图切换（股票列表 / 垃圾池） */
 .view-header {
   display: flex;
@@ -622,8 +736,14 @@ button:disabled {
   gap: 12px;
 }
 
+/* 标题定宽，避免「股票列表/垃圾池」字数不同导致右侧切换按钮左右移动：
+   字号缩到 14px 后 4 字（股票列表）恰为原字号 3 字（垃圾池）的宽度，
+   按钮位置恒等于垃圾池视图时的位置 */
 .view-header h3 {
   margin: 0;
+  font-size: 14px;
+  width: 4em;
+  white-space: nowrap;
 }
 
 /* 分页栏 */
@@ -667,11 +787,23 @@ button:disabled {
   padding: 2px;
 }
 
+/* 涨跌幅表头：排序钮换行到文字下方 */
+.th-percent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.sort-row {
+  display: inline-flex;
+  gap: 2px;
+}
+
 /* 排序切换 */
 .sort-toggle {
   cursor: pointer;
   font-size: 12px;
-  margin-left: 2px;
   opacity: 0.45;
   user-select: none;
 }
@@ -694,22 +826,45 @@ button:disabled {
   opacity: 0.75;
 }
 
-/* 详情页分区 */
+/* 详情页分区：浅灰卡片，标题带绿色竖条 */
 .detail-section {
   margin-bottom: 10px;
-  padding: 8px;
-  border: 1px solid #eee;
-  border-radius: 4px;
+  padding: 10px 12px;
+  background: #f7f8fa;
+  border: 1px solid #eef1f4;
+  border-radius: 6px;
 }
 
 .detail-section h5 {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-size: 13px;
-  color: #666;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
+.detail-section h5::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  background: #4caf50;
+  border-radius: 2px;
+}
+
+/* 数据区两层结构：首行为表头（弱化小字），次行为数值（加粗） */
 .detail-section .stock-data span {
   font-size: 14px;
+  font-weight: bold;
+  color: #333;
+  padding: 2px 0;
+}
+
+.detail-section .stock-data:first-of-type span {
+  font-size: 12px;
+  font-weight: normal;
+  color: #8a919a;
+  padding: 0;
 }
 
 /* 详情页去掉现价列后，当日/导入以来两栏改为 3 列 */
@@ -717,12 +872,58 @@ button:disabled {
   grid-template-columns: repeat(3, 1fr);
 }
 
-/* 股价提醒分组内的目标行不需要额外外边距 */
-.alert-section .target-group {
-  margin-bottom: 8px;
+/* 提醒区改为纵向 flex + gap 统一间距：切换当日/导入以来时
+   两状态内容高度完全一致，避免弹窗居中布局上下抖动 */
+.alert-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.alert-section .target-group:last-child {
+/* 提醒区头部：标题居左、维度切换居右 */
+.alert-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alert-head h5 {
+  margin: 0;
+}
+
+/* 维度切换：轻量分段控件（浅灰轨道 + 白底活动段），区别于工具栏的绿色开关 */
+.alert-dim-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  background: #e8ebee;
+  border-radius: 10px;
+}
+
+.alert-dim-switch button {
+  height: 20px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #8a919a;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.alert-dim-switch button.active {
+  background: #fff;
+  color: #2e7d32;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* 间距由 .alert-section 的 gap 统一提供，组自身不再带外边距 */
+.alert-section .target-group {
   margin-bottom: 0;
 }
 

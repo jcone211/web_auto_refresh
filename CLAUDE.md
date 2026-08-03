@@ -42,12 +42,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### thswc 特有细节
 
 - popup.js 通过 `import` 使用 `utils.js`（`getDateTime`、`Mutex`）；`Mutex` 用于串行化并发的 `DOCUMENT_CAPTURED` 处理，新增异步解析逻辑时须包在 lock/unlock 内。
-- 选择器表 `selectorsEnum`：`wc1`（iwencai 结果页）/ `xq1`（雪球个股页）两组。**抓取解析按抓取页域名派发**（`selectorKeyForUrl`，与下拉框无关，过渡期两站点页面都能解析）；**刷新目标与名称跳转由下拉选择器决定**：`xq1` 且股票已有 `prefix+code` 时，以 `effectiveStockUrl`（shared/utils.js）拼接雪球个股页 `https://xueqiu.com/S/<prefix><code>` 作为刷新/跳转地址（问财链接添加的股票也会改刷雪球），代码未知则回退存储 URL。选择器变更时持久化到 sync 并镜像当前组合，发 `{action:'refresh'}` 触发 background 立即重排 alarm。支持新版式 = 加一组枚举并在 popup.js 的处理分支中扩展。
+- 选择器表 `selectorsEnum`：`wc1`（iwencai 结果页）/ `xq1`（雪球个股页）两组。**抓取解析按抓取页域名派发**（`selectorKeyForUrl`，与下拉框无关，过渡期两站点页面都能解析）；**刷新目标与名称跳转由下拉选择器决定**：`xq1` 且股票已有 `prefix+code` 时，以 `effectiveStockUrl`（shared/utils.js）拼接雪球个股页 `https://xueqiu.com/S/<prefix><code>` 作为刷新/跳转地址（问财链接添加的股票也会改刷雪球），代码未知则回退存储 URL。**ETF 例外**：问财不支持 ETF 查询，code 为 6 位且以 159/51/58 开头时不论选择器一律走雪球——`etfPrefixForCode` 由代码推导交易所前缀（159→SZ，51/58→SH），刷新（`effectiveStockUrl`）、名称跳转（`buildJumpUrl`）、快速打开（quickOpen 输入 ETF 代码直开雪球个股页）三处共用该规则。选择器变更时持久化到 sync 并镜像当前组合，发 `{action:'refresh'}` 触发 background 立即重排 alarm。支持新版式 = 加一组枚举并在 popup.js 的处理分支中扩展。
 - 开盘价由 `当前价 - 涨跌额` 反推（`kpj = dqj - zdf`），页面上没有直接的开盘价字段。
 - 股票条目 `stopRunning: true` 表示不参与定时刷新，`inTrash: true` 表示在垃圾池。background 调度按 `currentView`（list/trash，持久化在 local）+ `inTrash` + `stopRunning` 三重过滤——只刷新当前视图下的股票；增删股票/切换启停发 `{action: 'refresh'}`，切换视图发 `{action: 'setView'}`。
 - 数据模型：`importPrice`（初始价格，首次抓取自动回填当前价，之后仅手动改）；`importTargetPercentLe/Ge`（导入以来目标阈值）；通知锁存 `notifiedDaily`/`notifiedImport` 相互独立，当日或导入以来任一越界即通知；导入以来涨跌幅为派生值 `(currentPrice-importPrice)/importPrice*100`，不存储。
 - 首次启动自动把 stockList 从 sync 迁移到 local（background `ensureMigrated` 幂等，background 是唯一迁移执行者，popup 不自行迁移）；存储的 url 恒为 `new URL().href` 百分号编码形态，显示层统一 `safeDecodeUrl` 解码。
-- popup 列表支持分页（pageSize 存 sync，默认 10）、按当日/导入以来涨跌幅排序、股票列表与垃圾池双视图；数据可经工具栏导入导出 JSON（导入按 URL 合并）。
+- popup 列表支持分页（pageSize 存 sync，默认 10）、按当日/导入以来涨跌幅排序、股票列表与垃圾池双视图；数据可经工具栏导入导出 JSON（导入按 URL 合并），导入导出可登记为命名组合（不超过 4 字），页脚首行「持仓组合」标签 + 导入导出图标 + 分页同行、组合卡片独立成行，一键切换组合；非活动组合可经 chip 内 × 删除（活动组合须先切走；初始组合「默认」固定首位、不可删除）。
 - 股票列表通过 DOM 字符串拼接渲染（`renderStock`），编辑/启停按钮在渲染时逐个绑定事件，勿依赖事件委托。
 
 ## 编码约定
