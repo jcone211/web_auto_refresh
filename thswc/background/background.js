@@ -66,7 +66,7 @@ chrome.action.onClicked.addListener(() => {
                         chrome.windows.create({
                             url: chrome.runtime.getURL('popup.html'),
                             type: 'popup',
-                            width: 570,
+                            width: 580,
                             height: 492 + Math.max(rows - 2, 0) * 56,
                             left: currentWindow.width - 400,
                             top: 50
