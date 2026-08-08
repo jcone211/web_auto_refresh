@@ -42,6 +42,7 @@
             <div class="container toolbar-actions">
                 <div class="create-link tool-btn" id="addStock">+</div>
                 <div class="tool-btn doc-icon-btn" id="openKeyPointsBtn" title="要点管理">📄</div>
+                <div class="tool-btn settings-icon-btn" id="openSettingsBtn" title="全局设置">⚙️</div>
                 <div class="switch-group">
                     <button id="startBtn" class="tool-btn active">开始</button>
                     <button id="stopBtn" class="tool-btn" disabled>停止</button>
@@ -79,17 +80,20 @@
             </table>
         </div>
         <div class="table-footer">
-            <!-- 首行：持仓组合标签；次行组合卡片；末行：导入导出 + 分页 -->
-            <div class="footer-top">
+            <!-- 首行：持仓组合标签 + 分页栏（导入导出按钮绝对定位于分页栏左侧） -->
+            <div class="footer-row">
                 <span id="comboLabel" class="combo-label">持仓组合</span>
+                <div class="pagination-area">
+                    <div class="io-buttons">
+                        <button id="exportBtn" class="io-icon-btn" title="导出全部数据"><img src="icons/export.svg" alt="导出"></button>
+                        <button id="importBtn" class="io-icon-btn" title="导入全部数据"><img src="icons/import.svg" alt="导入"></button>
+                        <input type="file" id="importFileInput" accept=".json,application/json" style="display:none">
+                    </div>
+                    <div id="paginationBar" class="pagination-bar"></div>
+                </div>
             </div>
+            <!-- 次行：组合卡片 -->
             <span id="comboSwitches" class="combo-switches"></span>
-            <div class="footer-bottom">
-                <button id="exportBtn" class="io-icon-btn" title="导出全部数据"><img src="icons/export.svg" alt="导出"></button>
-                <button id="importBtn" class="io-icon-btn" title="导入全部数据"><img src="icons/import.svg" alt="导入"></button>
-                <input type="file" id="importFileInput" accept=".json,application/json" style="display:none">
-                <div id="paginationBar" class="pagination-bar"></div>
-            </div>
         </div>
     </div>
 
@@ -107,7 +111,8 @@
             <div id="tabKeyPointsContent">
                 <div class="keypoints-input-area">
                     <input type="text" id="keyPointText" placeholder="输入要点内容" class="keypoint-text-input">
-                    <input type="number" id="keyPointWeight" placeholder="权重" min="1" max="99" class="keypoint-weight-input">
+                    <input type="number" id="keyPointWeight" placeholder="权重" min="1" max="99"
+                        class="keypoint-weight-input">
                     <button id="addKeyPointBtn" class="keypoint-add-btn">添加</button>
                 </div>
                 <div class="keypoints-list" id="keyPointsList">
@@ -131,8 +136,23 @@
         </div>
     </div>
 
+    <!-- 全局设置弹窗 -->
+    <div class="overlay" id="settingsOverlay" style="display:none">
+        <div class="settings-model">
+            <div class="close-btn" id="closeSettingsBtn" title="关闭">×</div>
+            <h4>全局设置</h4>
+            <div class="settings-item">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="autoResizeWindowToggle">
+                    <span class="toggle-label">切换组合时，浏览器窗口自动伸缩</span>
+                </label>
+                <p class="settings-desc">开启后，切换组合时插件弹窗将根据股票数量自动调整高度</p>
+            </div>
+        </div>
+    </div>
+
     <!-- 添加编辑股票div -->
-    <div class="overlay">
+    <div class="overlay" id="stockEditOverlay">
         <div id="stockModel" class="stock-model">
             <div class="close-btn" title="关闭">×</div>
             <div class="stock-model-body">
@@ -205,13 +225,15 @@
                             <div class="target-percent-div">
                                 <div class="tp-row">
                                     <span class="tp-sym sym-le">&le;</span>
-                                    <input type="number" id="importTargetPercentLe" class="tp-percent" placeholder="涨跌幅%">
+                                    <input type="number" id="importTargetPercentLe" class="tp-percent"
+                                        placeholder="涨跌幅%">
                                     <input type="number" id="importLePriceInput" class="target-price-input" step="0.01"
                                         placeholder="目标价" title="目标价，与涨跌幅联动">
                                 </div>
                                 <div class="tp-row">
                                     <span class="tp-sym sym-ge">&ge;</span>
-                                    <input type="number" id="importTargetPercentGe" class="tp-percent" placeholder="涨跌幅%">
+                                    <input type="number" id="importTargetPercentGe" class="tp-percent"
+                                        placeholder="涨跌幅%">
                                     <input type="number" id="importGePriceInput" class="target-price-input" step="0.01"
                                         placeholder="目标价" title="目标价，与涨跌幅联动">
                                 </div>

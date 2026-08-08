@@ -43,6 +43,7 @@ let keyPoints = []; // 要点列表：[{ text, weight }]
 let editingKeyPointIndex = -1; // 编辑中的要点索引，-1 表示新增模式
 let events = []; // 事件列表：[{ id, keyPointText, content, time, status }]
 let editingEventId = null; // 编辑中的事件 ID，null 表示新增模式
+let autoResizeWindow = false; // 切换组合时专属窗口自动伸缩
 
 // 抓取规则（解析在 parsers.js，按域名派发）
 const selectorsEnum = {
@@ -68,8 +69,8 @@ const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const selectorEl = document.getElementById('selectorName');
 const addStockEl = document.getElementById('addStock');
-const overlayEl = document.querySelector('.overlay');
-const closeBtnEl = document.querySelector('.close-btn');
+const overlayEl = document.getElementById('stockEditOverlay');
+const closeBtnEl = overlayEl.querySelector('.close-btn');
 const lastMonitorEl = document.getElementById('lastMonitor');
 const saveStockBtnEl = document.getElementById('saveStock');
 const delStockBtnEl = document.getElementById('delStock');
@@ -128,6 +129,11 @@ const eventContentInputEl = document.getElementById('eventContent');
 const eventDateInputEl = document.getElementById('eventDate');
 const addEventBtnEl = document.getElementById('addEventBtn');
 const eventsListEl = document.getElementById('eventsList');
+// 全局设置
+const openSettingsBtnEl = document.getElementById('openSettingsBtn');
+const settingsOverlayEl = document.getElementById('settingsOverlay');
+const closeSettingsBtnEl = document.getElementById('closeSettingsBtn');
+const autoResizeToggleEl = document.getElementById('autoResizeWindowToggle');
 
 // 编辑表单（封装渲染/清空/联动）
 const editForm = createEditForm({
@@ -155,6 +161,7 @@ function saveAndRender() {
     chrome.storage.local.set({ stockList, portfolios }, () => {
         renderStockList();
         chrome.runtime.sendMessage({ action: 'refresh' });
+        requestResizePopup();
     });
 }
 
@@ -306,6 +313,7 @@ function switchView(view) {
     currentPage = 1;
     updateViewToggleUI();
     renderStockList();
+    requestResizePopup();
 }
 
 function switchPortfolio(name) {
@@ -321,6 +329,7 @@ function switchPortfolio(name) {
     refreshCombos();
     renderStockList();
     chrome.runtime.sendMessage({ action: 'refresh' });
+    requestResizePopup();
 }
 
 // 命名保留字检查
@@ -584,6 +593,13 @@ async function initState() {
 initState().then(() => {
     refreshCombos();
     renderStockList();
+    // 组合标签行渲染后补一次 resize，修正初始高度差值（不受设置开关限制）
+    const count = stockList.filter(s => currentView === 'trash' ? s.inTrash : !s.inTrash).length;
+    chrome.runtime.sendMessage({ action: 'resizePopupWindow', rows: Math.min(count, pageSize) });
+    // 加载全局设置
+    chrome.storage.sync.get(['autoResizeWindow'], (result) => {
+        autoResizeWindow = !!result.autoResizeWindow;
+    });
 });
 
 quickOpenEl.addEventListener('keydown', (event) => {
@@ -797,6 +813,24 @@ function closeKeyPoints() {
     resetKeyPointForm();
 }
 
+// ---------------- 全局设置 ----------------
+function openSettings() {
+    autoResizeToggleEl.checked = autoResizeWindow;
+    settingsOverlayEl.style.display = 'flex';
+}
+
+function closeSettings() {
+    settingsOverlayEl.style.display = 'none';
+}
+
+// 请求插件弹窗按当前活动股票数量调整高度
+function requestResizePopup() {
+    if (!autoResizeWindow) return;
+    const count = stockList.filter(s => currentView === 'trash' ? s.inTrash : !s.inTrash).length;
+    const rows = Math.min(count, pageSize);
+    chrome.runtime.sendMessage({ action: 'resizePopupWindow', rows });
+}
+
 // 重置表单
 function resetKeyPointForm() {
     keyPointTextInputEl.value = '';
@@ -854,6 +888,17 @@ closeKeyPointsBtnEl.addEventListener('click', closeKeyPoints);
 addKeyPointBtnEl.addEventListener('click', addOrUpdateKeyPoint);
 keyPointsOverlayEl.addEventListener('click', (e) => {
     if (e.target === keyPointsOverlayEl) closeKeyPoints();
+});
+
+// 全局设置事件绑定
+openSettingsBtnEl.addEventListener('click', openSettings);
+closeSettingsBtnEl.addEventListener('click', closeSettings);
+settingsOverlayEl.addEventListener('click', (e) => {
+    if (e.target === settingsOverlayEl) closeSettings();
+});
+autoResizeToggleEl.addEventListener('change', () => {
+    autoResizeWindow = autoResizeToggleEl.checked;
+    chrome.storage.sync.set({ autoResizeWindow });
 });
 
 // 初始化加载要点数据

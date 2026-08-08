@@ -639,7 +639,7 @@ button:disabled {
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-/* 表格页脚：首行组合标签+导入导出图标+分页，次行组合卡片 */
+/* 表格页脚：首行持仓组合标签 + 分页栏，次行组合卡片 */
 .table-footer {
   display: flex;
   flex-direction: column;
@@ -647,23 +647,29 @@ button:disabled {
   padding: 2px 2px 0;
 }
 
-.footer-top {
+/* 首行：持仓组合 + 分页栏（推到右侧） */
+.footer-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
-.footer-bottom {
+/* 分页区域：作为导入导出按钮的定位锚点，推到行尾 */
+.pagination-area {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* 分页推到行尾 */
-.footer-bottom .pagination-bar {
   margin-left: auto;
+}
+
+/* 导入导出按钮组：绝对定位于分页栏左侧 16px */
+.pagination-area > .io-buttons {
+  position: absolute;
+  right: 100%;
+  margin-right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .combo-label {
@@ -699,6 +705,7 @@ button:disabled {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  margin-top: 8px;
 }
 
 .combo-chip {
@@ -1400,4 +1407,81 @@ button:disabled {
 
 .event-delete-btn:hover {
   background: #da190b;
+}
+
+/* 全局设置图标按钮 */
+.settings-icon-btn {
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.settings-icon-btn:hover {
+  background: #e3f2fd;
+}
+
+/* 全局设置弹窗 */
+.settings-model {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  z-index: 10000;
+  padding: 20px;
+}
+
+.settings-model h4 {
+  margin: 0 0 15px 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.settings-model .close-btn {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+  line-height: 1;
+}
+
+.settings-model .close-btn:hover {
+  color: #333;
+}
+
+.settings-item {
+  margin-bottom: 12px;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+}
+
+.settings-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.toggle-label {
+  user-select: none;
+}
+
+.settings-desc {
+  margin: 6px 0 0 24px;
+  font-size: 12px;
+  color: #888;
+  line-height: 1.5;
 }

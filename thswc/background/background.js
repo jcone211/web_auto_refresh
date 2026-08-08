@@ -70,7 +70,7 @@ chrome.action.onClicked.addListener(() => {
                             url: chrome.runtime.getURL('popup.html'),
                             type: 'popup',
                             width: 580,
-                            height: 492 + Math.max(rows - 2, 0) * 56,
+                            height: 514 + Math.max(rows - 2, 0) * 56,
                             left: currentWindow.width - 400,
                             top: 50
                         }, (newWindow) => {
@@ -248,6 +248,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
         });
         sendResponse({ status: 'ok' });
+    } else if (request.action === 'resizePopupWindow') {
+        resizePopupWindow(request.rows || 0);
+        sendResponse({ status: 'ok' });
     } else if (request.type === 'DOCUMENT_CAPTURED') {
         // 停止监控（无 refreshTimer）后，已打开标签页里的 content script 仍会因
         // 行情页 DOM 实时变动持续上报；此时直接丢弃，不转发 popup，
@@ -348,17 +351,18 @@ function refreshStockTab(url) {
     });
 }
 
-// 创建专属窗口并打开标签页
+// 创建专属窗口并打开标签页（创建后立即最小化，不占屏幕空间）
 function createStockWindowAndOpenTab(url) {
     chrome.windows.create({
         url: url,
         type: 'normal',
-        focused: false, // 后台创建，不抢焦点
+        focused: false,
         width: 800,
         height: 600
     }, (newWindow) => {
         if (newWindow && newWindow.id) {
             chrome.storage.local.set({ stockWindowId: newWindow.id });
+            chrome.windows.update(newWindow.id, { state: 'minimized' });
             dbg('创建专属窗口:', newWindow.id);
         }
     });
@@ -376,6 +380,19 @@ function openOrRefreshTabInWindow(windowId, url) {
         } else {
             chrome.tabs.create({ windowId, url, active: false }); // 后台打开，不抢焦点
         }
+    });
+}
+
+// 按行数调整插件弹窗高度（与 popupWindowId 创建时的计算一致）
+function resizePopupWindow(rows) {
+    chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
+        if (!popupWindowId) return;
+        chrome.windows.get(popupWindowId, (window) => {
+            if (chrome.runtime.lastError || !window) return;
+            const newHeight = 514 + Math.max(rows - 2, 0) * 56;
+            chrome.windows.update(popupWindowId, { height: newHeight });
+            dbg('弹窗调整高度:', newHeight, 'rows=', rows);
+        });
     });
 }
 
