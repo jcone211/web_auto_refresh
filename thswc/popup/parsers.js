@@ -12,7 +12,7 @@ export function getTargetData(doc, selector) {
 export function parseWc1(doc, selector) {
     let name = getTargetData(doc, selector.name);
     if (!name) return null;
-    name = name.replace(/\s*\(.*?\)/, '').trim();
+    name = name.substring(0, name.indexOf('('));
     const { code, prefix } = extractCodePrefixFromDot(getTargetData(doc, selector.code));
     const dqj = parseFloat(getTargetData(doc, selector.dqj));
     const zdf = parseFloat(getTargetData(doc, selector.zdf));
