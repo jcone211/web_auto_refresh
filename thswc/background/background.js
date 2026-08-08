@@ -1,5 +1,8 @@
 import { stripSign, effectiveStockUrl, isKnownMarketPrefix } from '../shared/utils.js';
 
+// 默认组合（不可删除、不可重命名）
+const DEFAULT_PORTFOLIOS = ['默认', '持仓', '观察'];
+
 // 诊断日志开关：排查完成后置 false 可停止周期性刷屏
 const DEBUG = false;
 const dbg = (...args) => { if (DEBUG) console.log('[thswc:bg]', ...args); };
@@ -82,10 +85,14 @@ chrome.action.onClicked.addListener(() => {
 
 // 监听窗口关闭：仅当关闭的是插件弹窗时停止监控
 chrome.windows.onRemoved.addListener((closedWindowId) => {
-    chrome.storage.local.get('popupWindowId', ({ popupWindowId }) => {
-        if (closedWindowId !== popupWindowId) return;
-        chrome.storage.local.set({ popupWindowId: null });
-        chrome.alarms.clearAll();
+    chrome.storage.local.get(['popupWindowId', 'stockWindowId'], ({ popupWindowId, stockWindowId }) => {
+        if (closedWindowId === popupWindowId) {
+            chrome.storage.local.set({ popupWindowId: null });
+            chrome.alarms.clearAll();
+        }
+        if (closedWindowId === stockWindowId) {
+            chrome.storage.local.set({ stockWindowId: null });
+        }
     });
 });
 
@@ -114,15 +121,37 @@ function ensureMigrated() {
             }
             const finish = (list) => {
                 const migratedList = migrateStockFields(list);
-                // 组合迁移：若尚无 portfolios，则以当前列表 + 选择器建「默认」组合
-                if ('portfolios' in localResult) {
-                    chrome.storage.local.set({ stockList: migratedList }, resolve);
-                } else {
-                    chrome.storage.sync.get(['selectorName'], (syncSel) => {
-                        const portfolios = { '默认': { stockList: migratedList, selectorName: syncSel.selectorName || '' } };
-                        chrome.storage.local.set({ stockList: migratedList, portfolios, activePortfolio: '默认' }, resolve);
+                // 组合迁移：确保三个默认组合存在（幂等）
+                chrome.storage.sync.get(['selectorName'], (syncSel) => {
+                    const currentSelector = syncSel.selectorName || '';
+                    const portfolios = localResult.portfolios || {};
+
+                    // 补全缺失的默认组合
+                    DEFAULT_PORTFOLIOS.forEach(name => {
+                        if (!portfolios[name]) {
+                            portfolios[name] = { stockList: [], selectorName: currentSelector };
+                        }
                     });
-                }
+
+                    // 首次迁移：将原有 stockList 放入「默认」
+                    if (!localResult.portfolios) {
+                        portfolios['默认'].stockList = migratedList;
+                    }
+
+                    const activePortfolio = localResult.activePortfolio || '持仓';
+
+                    // 要点和事件：首次初始化默认数据（幂等）
+                    const keyPoints = localResult.keyPoints || [
+                        { text: '跌到波段新低放量', weight: 10 },
+                        { text: '波段新底暴跌但缩量', weight: 9 },
+                        { text: 'MACD底背离', weight: 2 }
+                    ];
+                    const events = localResult.events || [
+                        { id: 'demo001', keyPointText: '波段新底暴跌但缩量', content: '恒瑞医药机会', time: '2025-07-17', status: 'accurate' }
+                    ];
+
+                    chrome.storage.local.set({ stockList: migratedList, portfolios, activePortfolio, keyPoints, events }, resolve);
+                });
             };
             if ('stockList' in localResult) {
                 // 已迁移过，仅补齐老数据字段
@@ -189,7 +218,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         currentView,
                         stockList: localResult.stockList || [],
                         portfolios: localResult.portfolios || {},
-                        activePortfolio: localResult.activePortfolio || '默认'
+                        activePortfolio: localResult.activePortfolio || '持仓'
                     });
                 });
             });
@@ -298,25 +327,54 @@ function scheduleStockAlarms() {
     });
 }
 
-// 刷新（或新打开）单只股票的标签页
+// 刷新（或新打开）单只股票的标签页（使用专属窗口）
 function refreshStockTab(url) {
-    // tabs.query 的 url 按 match pattern 匹配，query string 也参与比较：
-    // 问财标签页地址携带 sign= 时间戳，按存储的无 sign URL 精确查询必然 0 命中，
-    // 导致每个周期都误开新标签。故按同站 origin/* 粗查，再用剔 sign 的 URL 精确过滤。
-    let query;
-    try {
-        query = { url: new URL(url).origin + '/*' };
-    } catch {
-        query = {};
-    }
-    chrome.tabs.query(query, (tabs) => {
+    chrome.storage.local.get('stockWindowId', ({ stockWindowId }) => {
+        // 检查专属窗口是否存在
+        if (stockWindowId) {
+            chrome.windows.get(stockWindowId, (window) => {
+                if (chrome.runtime.lastError || !window) {
+                    // 窗口已关闭，创建新的专属窗口
+                    createStockWindowAndOpenTab(url);
+                } else {
+                    // 专属窗口存在，在其中查找/创建标签页
+                    openOrRefreshTabInWindow(stockWindowId, url);
+                }
+            });
+        } else {
+            // 无专属窗口，创建新的
+            createStockWindowAndOpenTab(url);
+        }
+    });
+}
+
+// 创建专属窗口并打开标签页
+function createStockWindowAndOpenTab(url) {
+    chrome.windows.create({
+        url: url,
+        type: 'normal',
+        focused: false, // 后台创建，不抢焦点
+        width: 800,
+        height: 600
+    }, (newWindow) => {
+        if (newWindow && newWindow.id) {
+            chrome.storage.local.set({ stockWindowId: newWindow.id });
+            dbg('创建专属窗口:', newWindow.id);
+        }
+    });
+}
+
+// 在指定窗口中查找或创建标签页
+function openOrRefreshTabInWindow(windowId, url) {
+    // 查询该窗口下的所有标签页
+    chrome.tabs.query({ windowId }, (tabs) => {
         const target = tabs.find(t => stripSign(t.url) === stripSign(url));
-        dbg('刷新匹配:', url, '| 同站标签', tabs.length, '个 →',
+        dbg('窗口内刷新匹配:', url, '| 窗口标签', tabs.length, '个 →',
             target ? ('重载已有标签 ' + target.url) : '无匹配标签，新开');
         if (target) {
             chrome.tabs.reload(target.id);
         } else {
-            chrome.tabs.create({ url: url, active: false }); // 后台打开，不抢焦点
+            chrome.tabs.create({ windowId, url, active: false }); // 后台打开，不抢焦点
         }
     });
 }

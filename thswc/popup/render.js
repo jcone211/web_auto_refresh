@@ -1,5 +1,8 @@
 import { calcImportPercent, numOrNull, etfPrefixForCode } from '../shared/utils.js';
 
+// 默认组合（不可删除、不可重命名）
+const DEFAULT_PORTFOLIOS = ['默认', '持仓', '观察'];
+
 // 名称链接跳转：与刷新目标一致——
 // ETF（159/51/58）不论选择器恒跳雪球个股页（问财不支持 ETF）；
 // 其余跟随当前选择器：xq1 优先 prefix+code 拼个股页，无代码回退雪球搜索；wc1 用问财名称搜索
@@ -121,7 +124,7 @@ export function renderStock(stock, selectorName, handlers) {
     percentTd.appendChild(percentWrap);
     tr.appendChild(percentTd);
 
-    // 操作列：编辑 / 启停 / 置顶
+    // 操作列：编辑 / 启停 / 置顶 / 切换组合（可选）
     const td = document.createElement('td');
     const div = document.createElement('div');
     div.className = 'action-icons';
@@ -143,6 +146,19 @@ export function renderStock(stock, selectorName, handlers) {
     pinImg.title = stock.pinned ? '取消置顶' : '置顶到最前';
     pinImg.addEventListener('click', () => handlers.onTogglePin(stock));
     div.append(editImg, stopImg, pinImg);
+    // 切换组合按钮（仅当传入 onMoveToCombo 时渲染）
+    if (handlers.onMoveToCombo) {
+        const moveBtn = document.createElement('span');
+        moveBtn.className = 'move-combo-btn';
+        moveBtn.title = '切换组合';
+        moveBtn.innerHTML = '<span class="dots-icon">⋮</span>';
+        moveBtn.style.marginLeft = '5px';
+        moveBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handlers.onMoveToCombo(stock, moveBtn);
+        });
+        div.appendChild(moveBtn);
+    }
     td.appendChild(div);
     tr.appendChild(td);
     return tr;
@@ -192,13 +208,20 @@ export function renderSortToggles(currentSort, els) {
 }
 
 // 渲染组合切换 chip（单选语义：checkbox 外观，仅一个活动）；
-// handlers = { onSwitch, onDelete }，删除钮为 chip 内独立 ×
-export function renderComboSwitches(portfolios, active, container, { onSwitch, onDelete }) {
+// handlers = { onSwitch, onDelete, onAdd }，删除钮为 chip 内独立 ×（默认组合不渲染）；
+// 末尾追加 + 新建按钮
+export function renderComboSwitches(portfolios, active, container, { onSwitch, onDelete, onAdd }) {
     container.innerHTML = '';
     const names = Object.keys(portfolios);
-    // 初始组合「默认」固定展示在第一位（sort 稳定，其余保持登记顺序）
-    names.sort((a, b) => (a === '默认' ? -1 : b === '默认' ? 1 : 0));
-    if (names.length === 0) return;
+    // 排序：默认组合按 DEFAULT_PORTFOLIOS 顺序在前，其余保持登记顺序
+    names.sort((a, b) => {
+        const ai = DEFAULT_PORTFOLIOS.indexOf(a);
+        const bi = DEFAULT_PORTFOLIOS.indexOf(b);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return 0;
+    });
     names.forEach(name => {
         const label = document.createElement('label');
         label.className = 'combo-chip' + (name === active ? ' active' : '');
@@ -215,17 +238,29 @@ export function renderComboSwitches(portfolios, active, container, { onSwitch, o
         const txt = document.createElement('span');
         txt.textContent = name;
         label.append(cb, txt);
-        const del = document.createElement('span');
-        del.className = 'combo-del';
-        del.textContent = '×';
-        del.title = '删除组合';
-        del.addEventListener('click', (e) => {
-            // 阻止 label 默认行为，避免误触切换 checkbox
-            e.preventDefault();
-            e.stopPropagation();
-            onDelete(name);
-        });
-        label.appendChild(del);
+        // 仅非默认组合渲染删除按钮
+        if (!DEFAULT_PORTFOLIOS.includes(name)) {
+            const del = document.createElement('span');
+            del.className = 'combo-del';
+            del.textContent = '×';
+            del.title = '删除组合';
+            del.addEventListener('click', (e) => {
+                // 阻止 label 默认行为，避免误触切换 checkbox
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete(name);
+            });
+            label.appendChild(del);
+        }
         container.appendChild(label);
     });
+    // 末尾追加 + 新建按钮
+    if (onAdd) {
+        const addBtn = document.createElement('span');
+        addBtn.className = 'combo-add';
+        addBtn.textContent = '+';
+        addBtn.title = '新建组合';
+        addBtn.addEventListener('click', () => onAdd());
+        container.appendChild(addBtn);
+    }
 }

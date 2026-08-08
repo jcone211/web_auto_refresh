@@ -34,14 +34,20 @@ let currentPage = 1;
 let pageSize = 10;
 let currentSort = 'default'; // 'default' | 'percent-asc/desc' | 'importPercent-asc/desc'
 let portfolios = {};
-let activePortfolio = '默认';
+let activePortfolio = '持仓';
+// 默认组合（不可删除、不可重命名）
+const DEFAULT_PORTFOLIOS = ['默认', '持仓', '观察'];
 let stockList = [];
 let editUrl = undefined;
+let keyPoints = []; // 要点列表：[{ text, weight }]
+let editingKeyPointIndex = -1; // 编辑中的要点索引，-1 表示新增模式
+let events = []; // 事件列表：[{ id, keyPointText, content, time, status }]
+let editingEventId = null; // 编辑中的事件 ID，null 表示新增模式
 
 // 抓取规则（解析在 parsers.js，按域名派发）
 const selectorsEnum = {
     "wc1": { // 同花顺问财
-        name: ".input-base-copy",
+        name: ".code-info-bar .code-name",
         code: ".diagnosisList .code",
         dqj: ".code-info-bar .price",
         zdf: ".code-info-bar .rise-fall",
@@ -104,6 +110,24 @@ const importFileInputEl = document.getElementById('importFileInput');
 const comboSwitchesEl = document.getElementById('comboSwitches');
 const comboLabelEl = document.getElementById('comboLabel');
 const sortToggleEls = document.querySelectorAll('.sort-toggle');
+// 要点管理
+const openKeyPointsBtnEl = document.getElementById('openKeyPointsBtn');
+const keyPointsOverlayEl = document.getElementById('keyPointsOverlay');
+const closeKeyPointsBtnEl = document.getElementById('closeKeyPointsBtn');
+const keyPointTextInputEl = document.getElementById('keyPointText');
+const keyPointWeightInputEl = document.getElementById('keyPointWeight');
+const addKeyPointBtnEl = document.getElementById('addKeyPointBtn');
+const keyPointsListEl = document.getElementById('keyPointsList');
+// 事件管理
+const tabKeyPointsBtnEl = document.getElementById('tabKeyPointsBtn');
+const tabEventsBtnEl = document.getElementById('tabEventsBtn');
+const tabKeyPointsContentEl = document.getElementById('tabKeyPointsContent');
+const tabEventsContentEl = document.getElementById('tabEventsContent');
+const eventKeyPointSelectEl = document.getElementById('eventKeyPointSelect');
+const eventContentInputEl = document.getElementById('eventContent');
+const eventDateInputEl = document.getElementById('eventDate');
+const addEventBtnEl = document.getElementById('addEventBtn');
+const eventsListEl = document.getElementById('eventsList');
 
 // 编辑表单（封装渲染/清空/联动）
 const editForm = createEditForm({
@@ -137,7 +161,7 @@ function saveAndRender() {
 function refreshCombos() {
     // 无组合时仅隐藏标签（分页仍在同行），chips 容器由渲染函数清空
     comboLabelEl.style.display = Object.keys(portfolios).length ? '' : 'none';
-    renderComboSwitches(portfolios, activePortfolio, comboSwitchesEl, { onSwitch: switchPortfolio, onDelete: deletePortfolio });
+    renderComboSwitches(portfolios, activePortfolio, comboSwitchesEl, { onSwitch: switchPortfolio, onDelete: deletePortfolio, onAdd: addPortfolio });
 }
 
 // ---------------- 抓取处理 ----------------
@@ -250,6 +274,8 @@ function renderStockList() {
                 }
                 saveAndRender();
             },
+            // 仅列表视图显示切换组合按钮
+            onMoveToCombo: currentView === 'list' ? (stock, btn) => showMoveComboDropdown(stock, btn) : undefined,
         }));
     }
     renderPagination(paginationBarEl, { currentPage, totalPages, total: list.length, pageSize }, {
@@ -297,14 +323,110 @@ function switchPortfolio(name) {
     chrome.runtime.sendMessage({ action: 'refresh' });
 }
 
-// 删除组合：初始组合「默认」不可删；活动组合须先切走（避免活动指针悬空）；删除前 confirm 防误触
+// 命名保留字检查
+function isReservedPortfolioName(name) {
+    return DEFAULT_PORTFOLIOS.includes(name);
+}
+
+// 重名检查
+function isDuplicatePortfolioName(name) {
+    return portfolios[name] !== undefined;
+}
+
+// 删除组合：默认组合不可删；活动组合须先切走（避免活动指针悬空）；删除前 confirm 防误触
 function deletePortfolio(name) {
     if (!portfolios[name]) return;
-    if (name === '默认') { alert('初始组合「默认」不可删除'); return; }
+    if (DEFAULT_PORTFOLIOS.includes(name)) { alert(`默认组合「${name}」不可删除`); return; }
     if (name === activePortfolio) { alert('当前组合使用中，请先切换到其他组合再删除'); return; }
     if (!confirm(`删除组合「${name}」？组合内的股票快照将一并删除`)) return;
     delete portfolios[name];
     chrome.storage.local.set({ portfolios }, refreshCombos);
+}
+
+// 新建组合：弹窗命名，创建空组合并切换到该组合
+function addPortfolio() {
+    const name = promptComboName('新建组合（不超过4字）：');
+    if (name === null) return;
+    if (isReservedPortfolioName(name)) { alert(`「${name}」为默认组合名称，请更换其他名称`); return; }
+    if (isDuplicatePortfolioName(name)) { alert(`组合「${name}」已存在，请更换其他名称`); return; }
+    portfolios[name] = { stockList: [], selectorName };
+    chrome.storage.local.set({ portfolios }, () => {
+        switchPortfolio(name);
+        refreshCombos();
+    });
+}
+
+// 切换组合下拉框：显示在按钮旁，选择后将股票移动到目标组合
+function showMoveComboDropdown(stock, anchorEl) {
+    // 关闭已有下拉框
+    closeMoveComboDropdown();
+    const dropdown = document.createElement('div');
+    dropdown.className = 'move-combo-dropdown';
+    dropdown.id = 'moveComboDropdown';
+    // 获取所有组合名称（排除当前活动组合）
+    const comboNames = Object.keys(portfolios).filter(name => name !== activePortfolio);
+    if (comboNames.length === 0) {
+        dropdown.textContent = '无其他组合';
+        dropdown.className += ' empty';
+    } else {
+        comboNames.forEach(name => {
+            const item = document.createElement('div');
+            item.className = 'move-combo-item';
+            item.textContent = name;
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                moveStockToCombo(stock, name);
+                closeMoveComboDropdown();
+            });
+            dropdown.appendChild(item);
+        });
+    }
+    // 定位下拉框（相对按钮）
+    const rect = anchorEl.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = `${rect.bottom + 2}px`;
+    dropdown.style.left = `${rect.left - 60}px`;
+    document.body.appendChild(dropdown);
+    // 点击外部关闭
+    setTimeout(() => {
+        document.addEventListener('click', closeMoveComboDropdownOnClick);
+    }, 0);
+}
+
+function closeMoveComboDropdownOnClick(e) {
+    const dropdown = document.getElementById('moveComboDropdown');
+    if (dropdown && !dropdown.contains(e.target)) {
+        closeMoveComboDropdown();
+    }
+}
+
+function closeMoveComboDropdown() {
+    const dropdown = document.getElementById('moveComboDropdown');
+    if (dropdown) {
+        dropdown.remove();
+    }
+    document.removeEventListener('click', closeMoveComboDropdownOnClick);
+}
+
+// 将股票从当前组合移动到目标组合
+function moveStockToCombo(stock, targetComboName) {
+    if (!portfolios[targetComboName]) return;
+    // 从当前组合的 stockList 中移除
+    const idx = stockList.indexOf(stock);
+    if (idx !== -1) {
+        stockList.splice(idx, 1);
+    }
+    // 添加到目标组合的 stockList
+    if (!portfolios[targetComboName].stockList) {
+        portfolios[targetComboName].stockList = [];
+    }
+    portfolios[targetComboName].stockList.push(stock);
+    // 同步更新当前组合的存储
+    portfolios[activePortfolio].stockList = stockList;
+    chrome.storage.local.set({ portfolios }, () => {
+        renderStockList();
+        refreshCombos();
+    });
 }
 
 // ---------------- 导入 / 导出 ----------------
@@ -332,107 +454,84 @@ function promptComboName(message, prefilled) {
     return name;
 }
 
+// 全量导出：导出插件全部数据和配置
 async function handleExport() {
-    const defName = (activePortfolio && activePortfolio !== '默认') ? activePortfolio : '';
-    let name = promptComboName('组合命名（不超过4字，留空则为“问财导出”）：', defName);
-    if (name === null) return;
-    if (name === '') name = '问财导出';
-    const localData = await storageGet(chrome.storage.local, ['stockList']);
+    if (!confirm('将导出插件全部数据和配置（所有组合、要点、事件、设置等），确定继续？')) return;
+    const localData = await storageGet(chrome.storage.local, ['stockList', 'portfolios', 'activePortfolio', 'currentView', 'keyPoints', 'events']);
     const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize']);
-    const listSnapshot = (localData.stockList || []).map(s => ({ ...s }));
     const payload = {
-        version: 1,
+        version: 2,
+        type: 'full-backup',
         exportedAt: new Date().toISOString(),
-        portfolioName: name,
-        settings: {
+        local: {
+            stockList: localData.stockList || [],
+            portfolios: localData.portfolios || {},
+            activePortfolio: localData.activePortfolio || '持仓',
+            currentView: localData.currentView || 'list',
+            keyPoints: localData.keyPoints || [],
+            events: localData.events || [],
+        },
+        sync: {
             refreshInterval: syncData.refreshInterval,
             selectorName: syncData.selectorName,
             pageSize: syncData.pageSize,
         },
-        stockList: listSnapshot,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
-    a.download = `${name}_${comboTimestamp()}.json`;
+    a.download = `thswc_full_backup_${comboTimestamp()}.json`;
     a.href = URL.createObjectURL(blob);
     a.click();
     URL.revokeObjectURL(a.href);
-    // 登记/更新组合（导出即快照）
-    portfolios[name] = { stockList: listSnapshot, selectorName };
-    await new Promise(r => chrome.storage.local.set({ portfolios }, r));
-    refreshCombos();
 }
 
+// 全量导入：导入插件全部数据和配置（覆盖当前数据）
 async function handleImport(file) {
     let text;
     try { text = await file.text(); } catch { alert('文件读取失败'); return; }
     let data;
     try { data = JSON.parse(text); } catch { alert('JSON 解析失败'); return; }
-    if (!data || typeof data !== 'object' || !Array.isArray(data.stockList)) {
-        alert('无效文件：缺少 stockList 数组'); return;
+    // 验证格式
+    if (!data || typeof data !== 'object') {
+        alert('无效文件：不是有效的 JSON 对象'); return;
     }
-    const prefilled = validComboName(nameFromFile(file.name)) ? nameFromFile(file.name) : (data.portfolioName || '');
-    const name = promptComboName('组合命名（不超过4字，将作为该组合名称登记）：', prefilled);
-    if (name === null) return;
-    // 逐条清洗
-    const cleanList = [];
-    for (const raw of data.stockList) {
-        if (!raw || typeof raw !== 'object') continue;
-        const url = normalizeUrl(stripSign(raw.url));
-        if (!url) continue;
-        cleanList.push({
-            url,
-            name: String(raw.name || ''),
-            code: String(raw.code || ''),
-            prefix: String(raw.prefix || ''),
-            startPrice: numOrNull(raw.startPrice),
-            currentPrice: numOrNull(raw.currentPrice),
-            percent: numOrNull(raw.percent),
-            importPrice: numOrNull(raw.importPrice),
-            targetPercentLe: String(raw.targetPercentLe ?? ''),
-            targetPercentGe: String(raw.targetPercentGe ?? ''),
-            importTargetPercentLe: String(raw.importTargetPercentLe ?? ''),
-            importTargetPercentGe: String(raw.importTargetPercentGe ?? ''),
-            stopRunning: !!raw.stopRunning,
-            notifiedDaily: false,
-            notifiedImport: false,
-            inTrash: !!raw.inTrash,
-            pinned: !!raw.pinned,
-            pinOrder: numOrNull(raw.pinOrder),
-            createdAt: numOrNull(raw.createdAt),
-        });
+    if (data.type !== 'full-backup') {
+        if (!confirm('该文件不是全量备份格式，可能无法完整恢复。确定继续导入？')) return;
     }
-    // 目标组合：存在则按 URL 合并，不存在则新建
-    const importedSelector = (data.settings && typeof data.settings.selectorName === 'string') ? data.settings.selectorName : selectorName;
-    let targetList;
-    if (portfolios[name]) {
-        const urlMap = new Map((portfolios[name].stockList || []).map(s => [s.url, s]));
-        for (const item of cleanList) urlMap.set(item.url, item);
-        targetList = Array.from(urlMap.values());
-    } else {
-        targetList = cleanList;
-    }
-    portfolios[name] = { stockList: targetList, selectorName: importedSelector };
-    await new Promise(r => chrome.storage.local.set({ portfolios }, r));
-    // 导入到当前活动组合：stockList 接管合并后的同一引用，
-    // 否则下一次抓取/保存的镜像（portfolios[active].stockList = stockList）会用旧数组冲掉合并结果
-    if (name === activePortfolio) {
-        stockList = portfolios[name].stockList;
-        renderStockList();
-    }
-    // 全局恢复 interval/pageSize（选择器属组合，不动 sync.selectorName）
-    if (data.settings && typeof data.settings === 'object') {
-        const syncSet = {};
-        if (typeof data.settings.refreshInterval === 'number') syncSet.refreshInterval = data.settings.refreshInterval;
-        if (typeof data.settings.pageSize === 'number') syncSet.pageSize = data.settings.pageSize;
-        if (Object.keys(syncSet).length) {
-            await new Promise(r => chrome.storage.sync.set(syncSet, r));
-            if (syncSet.pageSize) pageSize = syncSet.pageSize;
-            if (syncSet.refreshInterval) intervalInput.value = syncSet.refreshInterval;
+    if (!confirm('导入将覆盖当前全部数据（所有组合、要点、事件、设置），确定继续？')) return;
+
+    // 恢复 local 数据
+    if (data.local && typeof data.local === 'object') {
+        const localSet = {};
+        if (Array.isArray(data.local.stockList)) localSet.stockList = data.local.stockList;
+        if (data.local.portfolios && typeof data.local.portfolios === 'object') localSet.portfolios = data.local.portfolios;
+        if (typeof data.local.activePortfolio === 'string') localSet.activePortfolio = data.local.activePortfolio;
+        if (typeof data.local.currentView === 'string') localSet.currentView = data.local.currentView;
+        if (Array.isArray(data.local.keyPoints)) localSet.keyPoints = data.local.keyPoints;
+        if (Array.isArray(data.local.events)) localSet.events = data.local.events;
+        if (Object.keys(localSet).length) {
+            await new Promise(r => chrome.storage.local.set(localSet, r));
         }
     }
+
+    // 恢复 sync 数据
+    if (data.sync && typeof data.sync === 'object') {
+        const syncSet = {};
+        if (typeof data.sync.refreshInterval === 'number') syncSet.refreshInterval = data.sync.refreshInterval;
+        if (typeof data.sync.selectorName === 'string') syncSet.selectorName = data.sync.selectorName;
+        if (typeof data.sync.pageSize === 'number') syncSet.pageSize = data.sync.pageSize;
+        if (Object.keys(syncSet).length) {
+            await new Promise(r => chrome.storage.sync.set(syncSet, r));
+        }
+    }
+
+    // 刷新当前页面状态
+    await initState();
+    renderStockList();
     refreshCombos();
-    alert(`导入完成：组合「${name}」有效 ${cleanList.length} 条，共 ${targetList.length} 条（未自动切换，可在右侧勾选切换）`);
+    loadKeyPoints();
+    loadEvents();
+    alert('导入完成，全部数据已恢复');
 }
 
 // ---------------- 编辑弹窗 ----------------
@@ -461,18 +560,28 @@ function updateStatus(isActive) {
 closeBtnEl.addEventListener('click', closeModal);
 window.addEventListener('click', (event) => { if (event.target === overlayEl) closeModal(); });
 
-chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
-    if (!response) return;
-    intervalInput.value = response.refreshInterval || 60;
-    selectorName = response.selectorName || 'wc1';
-    selectorEl.value = selectorName;
-    stockList = response.stockList || [];
-    pageSize = response.pageSize || 10;
-    currentView = response.currentView || 'list';
-    portfolios = response.portfolios || {};
-    activePortfolio = response.activePortfolio || '默认';
-    updateStatus(false);
-    updateViewToggleUI();
+// 初始化状态（从 background 获取最新数据）
+async function initState() {
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
+            if (!response) { resolve(); return; }
+            intervalInput.value = response.refreshInterval || 60;
+            selectorName = response.selectorName || 'wc1';
+            selectorEl.value = selectorName;
+            stockList = response.stockList || [];
+            pageSize = response.pageSize || 10;
+            currentView = response.currentView || 'list';
+            portfolios = response.portfolios || {};
+            activePortfolio = response.activePortfolio || '持仓';
+            updateStatus(false);
+            updateViewToggleUI();
+            resolve();
+        });
+    });
+}
+
+// 首次初始化
+initState().then(() => {
     refreshCombos();
     renderStockList();
 });
@@ -617,3 +726,307 @@ sortToggleEls.forEach(el => {
         renderStockList();
     });
 });
+
+// ---------------- 要点管理 ----------------
+// 加载要点数据
+function loadKeyPoints() {
+    chrome.storage.local.get(['keyPoints'], (result) => {
+        keyPoints = result.keyPoints || [];
+        renderKeyPointsList();
+    });
+}
+
+// 保存要点数据
+function saveKeyPoints() {
+    chrome.storage.local.set({ keyPoints });
+}
+
+// 渲染要点列表（按权重从大到小排序）
+function renderKeyPointsList() {
+    keyPointsListEl.innerHTML = '';
+    // 按权重降序排序
+    const sorted = [...keyPoints].sort((a, b) => b.weight - a.weight);
+    if (sorted.length === 0) {
+        keyPointsListEl.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">暂无要点，请添加</div>';
+        return;
+    }
+    sorted.forEach((kp, idx) => {
+        const realIdx = keyPoints.indexOf(kp);
+        const item = document.createElement('div');
+        item.className = 'keypoint-item';
+        item.innerHTML = `
+            <span class="keypoint-seq">${idx + 1}、</span>
+            <span class="keypoint-text">${escapeHtml(kp.text)}</span>
+            <span class="keypoint-weight">(${kp.weight})</span>
+            <div class="keypoint-actions">
+                <button class="keypoint-action-btn keypoint-edit-btn" data-idx="${realIdx}">编辑</button>
+                <button class="keypoint-action-btn keypoint-delete-btn" data-idx="${realIdx}">删除</button>
+            </div>
+        `;
+        keyPointsListEl.appendChild(item);
+    });
+    // 绑定编辑和删除事件
+    keyPointsListEl.querySelectorAll('.keypoint-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => editKeyPoint(parseInt(btn.dataset.idx)));
+    });
+    keyPointsListEl.querySelectorAll('.keypoint-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => deleteKeyPoint(parseInt(btn.dataset.idx)));
+    });
+}
+
+// HTML 转义
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 打开要点管理弹窗
+function openKeyPoints() {
+    keyPointsOverlayEl.style.display = 'flex';
+    resetKeyPointForm();
+    resetEventForm();
+    renderKeyPointsList();
+    updateEventKeyPointSelect();
+    switchTab('keypoints');
+}
+
+// 关闭要点管理弹窗
+function closeKeyPoints() {
+    keyPointsOverlayEl.style.display = 'none';
+    resetKeyPointForm();
+}
+
+// 重置表单
+function resetKeyPointForm() {
+    keyPointTextInputEl.value = '';
+    keyPointWeightInputEl.value = '';
+    editingKeyPointIndex = -1;
+    addKeyPointBtnEl.textContent = '添加';
+}
+
+// 添加或更新要点
+function addOrUpdateKeyPoint() {
+    const text = keyPointTextInputEl.value.trim();
+    const weight = parseInt(keyPointWeightInputEl.value);
+    if (!text) { alert('请输入要点内容'); return; }
+    if (!weight || weight < 1 || weight > 99) { alert('权重必须为 1-99 的数字'); return; }
+
+    if (editingKeyPointIndex === -1) {
+        // 新增模式
+        keyPoints.push({ text, weight });
+    } else {
+        // 编辑模式
+        keyPoints[editingKeyPointIndex] = { text, weight };
+    }
+    saveKeyPoints();
+    renderKeyPointsList();
+    resetKeyPointForm();
+}
+
+// 编辑要点
+function editKeyPoint(idx) {
+    const kp = keyPoints[idx];
+    if (!kp) return;
+    keyPointTextInputEl.value = kp.text;
+    keyPointWeightInputEl.value = kp.weight;
+    editingKeyPointIndex = idx;
+    addKeyPointBtnEl.textContent = '更新';
+    keyPointTextInputEl.focus();
+}
+
+// 删除要点
+function deleteKeyPoint(idx) {
+    if (!confirm('确定删除该要点？')) return;
+    keyPoints.splice(idx, 1);
+    saveKeyPoints();
+    renderKeyPointsList();
+    if (editingKeyPointIndex === idx) {
+        resetKeyPointForm();
+    } else if (editingKeyPointIndex > idx) {
+        editingKeyPointIndex--;
+    }
+}
+
+// 事件绑定
+openKeyPointsBtnEl.addEventListener('click', openKeyPoints);
+closeKeyPointsBtnEl.addEventListener('click', closeKeyPoints);
+addKeyPointBtnEl.addEventListener('click', addOrUpdateKeyPoint);
+keyPointsOverlayEl.addEventListener('click', (e) => {
+    if (e.target === keyPointsOverlayEl) closeKeyPoints();
+});
+
+// 初始化加载要点数据
+loadKeyPoints();
+
+// ---------------- 事件管理 ----------------
+// 加载事件数据
+function loadEvents() {
+    chrome.storage.local.get(['events'], (result) => {
+        events = result.events || [];
+        renderEventsList();
+        updateEventKeyPointSelect();
+    });
+}
+
+// 保存事件数据
+function saveEvents() {
+    chrome.storage.local.set({ events });
+}
+
+// 生成唯一 ID
+function generateEventId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+// 更新事件关联要点下拉框
+function updateEventKeyPointSelect() {
+    const currentValue = eventKeyPointSelectEl.value;
+    eventKeyPointSelectEl.innerHTML = '<option value="">选择关联要点</option>';
+    keyPoints.forEach(kp => {
+        const option = document.createElement('option');
+        option.value = kp.text;
+        option.textContent = kp.text;
+        eventKeyPointSelectEl.appendChild(option);
+    });
+    if (currentValue) {
+        eventKeyPointSelectEl.value = currentValue;
+    }
+}
+
+// 渲染事件列表（按时间倒序）
+function renderEventsList() {
+    eventsListEl.innerHTML = '';
+    // 按时间倒序排序
+    const sorted = [...events].sort((a, b) => new Date(b.time) - new Date(a.time));
+    if (sorted.length === 0) {
+        eventsListEl.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">暂无事件，请添加</div>';
+        return;
+    }
+    sorted.forEach(event => {
+        const item = document.createElement('div');
+        item.className = 'event-item';
+        const statusText = { pending: '待预测', accurate: '准确', wrong: '误判' }[event.status] || '待预测';
+        item.innerHTML = `
+            <span class="event-time">${event.time}</span>
+            ${event.keyPointText ? `<span class="event-keypoint-tag" title="${escapeHtml(event.keyPointText)}">${escapeHtml(event.keyPointText)}</span>` : ''}
+            <span class="event-content">${escapeHtml(event.content)}</span>
+            <span class="event-status ${event.status}" data-id="${event.id}" title="点击切换状态">${statusText}</span>
+            <div class="event-actions">
+                <button class="event-action-btn event-edit-btn" data-id="${event.id}">编辑</button>
+                <button class="event-action-btn event-delete-btn" data-id="${event.id}">删除</button>
+            </div>
+        `;
+        eventsListEl.appendChild(item);
+    });
+    // 绑定状态切换事件
+    eventsListEl.querySelectorAll('.event-status').forEach(el => {
+        el.addEventListener('click', () => cycleEventStatus(el.dataset.id));
+    });
+    // 绑定编辑和删除事件
+    eventsListEl.querySelectorAll('.event-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => editEvent(btn.dataset.id));
+    });
+    eventsListEl.querySelectorAll('.event-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => deleteEvent(btn.dataset.id));
+    });
+}
+
+// 循环切换事件状态：pending -> accurate -> wrong -> pending
+function cycleEventStatus(id) {
+    const event = events.find(e => e.id === id);
+    if (!event) return;
+    const statusOrder = ['pending', 'accurate', 'wrong'];
+    const currentIdx = statusOrder.indexOf(event.status);
+    event.status = statusOrder[(currentIdx + 1) % statusOrder.length];
+    saveEvents();
+    renderEventsList();
+}
+
+// 添加或更新事件
+function addOrUpdateEvent() {
+    const keyPointText = eventKeyPointSelectEl.value;
+    const content = eventContentInputEl.value.trim();
+    const time = eventDateInputEl.value;
+    if (!content) { alert('请输入事件内容'); return; }
+    if (!time) { alert('请选择日期'); return; }
+
+    if (editingEventId === null) {
+        // 新增模式
+        events.push({
+            id: generateEventId(),
+            keyPointText,
+            content,
+            time,
+            status: 'pending'
+        });
+    } else {
+        // 编辑模式
+        const event = events.find(e => e.id === editingEventId);
+        if (event) {
+            event.keyPointText = keyPointText;
+            event.content = content;
+            event.time = time;
+        }
+    }
+    saveEvents();
+    renderEventsList();
+    resetEventForm();
+}
+
+// 编辑事件
+function editEvent(id) {
+    const event = events.find(e => e.id === id);
+    if (!event) return;
+    eventKeyPointSelectEl.value = event.keyPointText || '';
+    eventContentInputEl.value = event.content;
+    eventDateInputEl.value = event.time;
+    editingEventId = id;
+    addEventBtnEl.textContent = '更新';
+    eventContentInputEl.focus();
+}
+
+// 删除事件
+function deleteEvent(id) {
+    if (!confirm('确定删除该事件？')) return;
+    events = events.filter(e => e.id !== id);
+    saveEvents();
+    renderEventsList();
+    if (editingEventId === id) {
+        resetEventForm();
+    }
+}
+
+// 重置事件表单
+function resetEventForm() {
+    eventKeyPointSelectEl.value = '';
+    eventContentInputEl.value = '';
+    eventDateInputEl.value = new Date().toISOString().split('T')[0];
+    editingEventId = null;
+    addEventBtnEl.textContent = '添加';
+}
+
+// 标签页切换
+function switchTab(tab) {
+    if (tab === 'keypoints') {
+        tabKeyPointsBtnEl.classList.add('active');
+        tabEventsBtnEl.classList.remove('active');
+        tabKeyPointsContentEl.style.display = 'block';
+        tabEventsContentEl.style.display = 'none';
+    } else {
+        tabEventsBtnEl.classList.add('active');
+        tabKeyPointsBtnEl.classList.remove('active');
+        tabEventsContentEl.style.display = 'block';
+        tabKeyPointsContentEl.style.display = 'none';
+        updateEventKeyPointSelect();
+        renderEventsList();
+    }
+}
+
+// 事件管理事件绑定
+tabKeyPointsBtnEl.addEventListener('click', () => switchTab('keypoints'));
+tabEventsBtnEl.addEventListener('click', () => switchTab('events'));
+addEventBtnEl.addEventListener('click', addOrUpdateEvent);
+
+// 初始化加载事件数据
+loadEvents();
