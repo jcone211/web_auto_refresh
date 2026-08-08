@@ -41,6 +41,7 @@
             </div>
             <div class="container toolbar-actions">
                 <div class="create-link tool-btn" id="addStock">+</div>
+                <div class="tool-btn doc-icon-btn" id="openKeyPointsBtn" title="要点管理">📄</div>
                 <div class="switch-group">
                     <button id="startBtn" class="tool-btn active">开始</button>
                     <button id="stopBtn" class="tool-btn" disabled>停止</button>
@@ -78,15 +79,55 @@
             </table>
         </div>
         <div class="table-footer">
-            <!-- 首行：持仓组合标签 + 导入导出图标 + 分页；次行组合卡片 -->
+            <!-- 首行：持仓组合标签；次行组合卡片；末行：导入导出 + 分页 -->
             <div class="footer-top">
                 <span id="comboLabel" class="combo-label">持仓组合</span>
-                <button id="exportBtn" class="io-icon-btn" title="导出"><img src="icons/export.svg" alt="导出"></button>
-                <button id="importBtn" class="io-icon-btn" title="导入"><img src="icons/import.svg" alt="导入"></button>
+            </div>
+            <span id="comboSwitches" class="combo-switches"></span>
+            <div class="footer-bottom">
+                <button id="exportBtn" class="io-icon-btn" title="导出全部数据"><img src="icons/export.svg" alt="导出"></button>
+                <button id="importBtn" class="io-icon-btn" title="导入全部数据"><img src="icons/import.svg" alt="导入"></button>
                 <input type="file" id="importFileInput" accept=".json,application/json" style="display:none">
                 <div id="paginationBar" class="pagination-bar"></div>
             </div>
-            <span id="comboSwitches" class="combo-switches"></span>
+        </div>
+    </div>
+
+    <!-- 要点管理弹窗 -->
+    <div class="overlay" id="keyPointsOverlay" style="display:none">
+        <div class="keypoints-model">
+            <div class="close-btn" id="closeKeyPointsBtn" title="关闭">×</div>
+            <h4>要点与事件管理</h4>
+            <!-- 标签页切换 -->
+            <div class="tab-switch">
+                <button type="button" id="tabKeyPointsBtn" class="tab-btn active">要点列表</button>
+                <button type="button" id="tabEventsBtn" class="tab-btn">事件记录</button>
+            </div>
+            <!-- 要点列表标签页 -->
+            <div id="tabKeyPointsContent">
+                <div class="keypoints-input-area">
+                    <input type="text" id="keyPointText" placeholder="输入要点内容" class="keypoint-text-input">
+                    <input type="number" id="keyPointWeight" placeholder="权重" min="1" max="99" class="keypoint-weight-input">
+                    <button id="addKeyPointBtn" class="keypoint-add-btn">添加</button>
+                </div>
+                <div class="keypoints-list" id="keyPointsList">
+                    <!-- 要点列表动态渲染 -->
+                </div>
+            </div>
+            <!-- 事件记录标签页 -->
+            <div id="tabEventsContent" style="display:none">
+                <div class="events-input-area">
+                    <select id="eventKeyPointSelect" class="event-keypoint-select">
+                        <option value="">选择关联要点</option>
+                    </select>
+                    <input type="text" id="eventContent" placeholder="事件内容" class="event-content-input">
+                    <input type="date" id="eventDate" class="event-date-input">
+                    <button id="addEventBtn" class="event-add-btn">添加</button>
+                </div>
+                <div class="events-list" id="eventsList">
+                    <!-- 事件列表动态渲染 -->
+                </div>
+            </div>
         </div>
     </div>
 

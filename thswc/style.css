@@ -654,8 +654,15 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.footer-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* 分页推到行尾 */
-.footer-top .pagination-bar {
+.footer-bottom .pagination-bar {
   margin-left: auto;
 }
 
@@ -731,6 +738,81 @@ button:disabled {
 
 .combo-del:hover {
   color: #fb0000;
+}
+
+/* 组合新建钮：默认弱化，hover 变绿 */
+.combo-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: #bbb;
+  font-size: 16px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  border: 1px dashed #ccc;
+  border-radius: 10px;
+  margin-left: 4px;
+}
+
+.combo-add:hover {
+  color: #4caf50;
+  border-color: #4caf50;
+}
+
+/* 切换组合按钮：与其他操作图标一致（18px，无框，hover 上浮） */
+.move-combo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: auto;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: transform 0.2s;
+}
+
+.move-combo-btn:hover {
+  transform: translateY(-2px);
+}
+
+.move-combo-btn .dots-icon {
+  font-size: 16px;
+  line-height: 1;
+  color: #333;
+  font-weight: bold;
+}
+
+/* 切换组合下拉框 */
+.move-combo-dropdown {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 80px;
+  padding: 4px 0;
+}
+
+.move-combo-dropdown.empty {
+  padding: 8px 12px;
+  color: #999;
+  font-size: 12px;
+  text-align: center;
+}
+
+.move-combo-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+}
+
+.move-combo-item:hover {
+  background: #e8f5e9;
+  color: #2e7d32;
 }
 
 /* 视图切换（股票列表 / 垃圾池） */
@@ -978,4 +1060,344 @@ button:disabled {
 .copy-icon:hover,
 .copy-icon.copied {
   opacity: 1;
+}
+
+/* 文档图标按钮 */
+.doc-icon-btn {
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.doc-icon-btn:hover {
+  background: #e8f5e9;
+}
+
+/* 要点管理弹窗 */
+.keypoints-model {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 500px;
+  max-height: 80vh;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  z-index: 10000;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.keypoints-model h4 {
+  margin: 0 0 15px 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.keypoints-model .close-btn {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+  line-height: 1;
+}
+
+.keypoints-model .close-btn:hover {
+  color: #333;
+}
+
+.keypoints-input-area {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+.keypoint-text-input {
+  flex: 1;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.keypoint-weight-input {
+  width: 60px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.keypoint-add-btn {
+  height: 32px;
+  padding: 0 16px;
+  background: #4caf50;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.keypoint-add-btn:hover {
+  background: #45a049;
+}
+
+.keypoints-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.keypoint-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: #f9f9f9;
+  border-radius: 4px;
+  border: 1px solid #eee;
+}
+
+.keypoint-item:hover {
+  background: #f0f9f0;
+  border-color: #4caf50;
+}
+
+.keypoint-seq {
+  font-weight: bold;
+  color: #666;
+  min-width: 20px;
+}
+
+.keypoint-text {
+  flex: 1;
+  font-size: 13px;
+  color: #333;
+}
+
+.keypoint-weight {
+  font-size: 12px;
+  color: #999;
+  padding: 2px 8px;
+  background: #e0e0e0;
+  border-radius: 10px;
+}
+
+.keypoint-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.keypoint-action-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.keypoint-edit-btn {
+  background: #2196f3;
+  color: #fff;
+}
+
+.keypoint-edit-btn:hover {
+  background: #0b7dda;
+}
+
+.keypoint-delete-btn {
+  background: #f44336;
+  color: #fff;
+}
+
+.keypoint-delete-btn:hover {
+  background: #da190b;
+}
+
+/* 标签页切换 */
+.tab-switch {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 15px;
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 8px;
+}
+
+.tab-btn {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: #666;
+  border-radius: 4px 4px 0 0;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: #f0f0f0;
+}
+
+.tab-btn.active {
+  background: #4caf50;
+  color: #fff;
+}
+
+/* 事件管理样式 */
+.events-input-area {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+
+.event-keypoint-select {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  min-width: 120px;
+}
+
+.event-content-input {
+  flex: 1;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  min-width: 150px;
+}
+
+.event-date-input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.event-add-btn {
+  height: 32px;
+  padding: 0 16px;
+  background: #2196f3;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.event-add-btn:hover {
+  background: #0b7dda;
+}
+
+.events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.event-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: #f9f9f9;
+  border-radius: 4px;
+  border: 1px solid #eee;
+}
+
+.event-item:hover {
+  background: #f0f7ff;
+  border-color: #2196f3;
+}
+
+.event-time {
+  font-size: 12px;
+  color: #666;
+  min-width: 80px;
+}
+
+.event-keypoint-tag {
+  font-size: 11px;
+  color: #4caf50;
+  background: #e8f5e9;
+  padding: 2px 8px;
+  border-radius: 10px;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-content {
+  flex: 1;
+  font-size: 13px;
+  color: #333;
+}
+
+.event-status {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.event-status.pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.event-status.accurate {
+  background: #d4edda;
+  color: #155724;
+}
+
+.event-status.wrong {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.event-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.event-action-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.event-edit-btn {
+  background: #2196f3;
+  color: #fff;
+}
+
+.event-edit-btn:hover {
+  background: #0b7dda;
+}
+
+.event-delete-btn {
+  background: #f44336;
+  color: #fff;
+}
+
+.event-delete-btn:hover {
+  background: #da190b;
 }
