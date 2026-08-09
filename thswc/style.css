@@ -1189,6 +1189,12 @@ button:disabled {
   flex: 1;
   font-size: 13px;
   color: #333;
+  cursor: pointer;
+}
+
+.keypoint-text:hover {
+  color: #2196f3;
+  text-decoration: underline;
 }
 
 .keypoint-weight {
@@ -1261,33 +1267,37 @@ button:disabled {
 
 /* 事件管理样式 */
 .events-input-area {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px;
   gap: 8px;
   margin-bottom: 15px;
-  flex-wrap: wrap;
+}
+
+.event-keypoint-select,
+.event-date-input {
+  width: 100%;
+  height: 32px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
 }
 
 .event-keypoint-select {
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 13px;
-  min-width: 120px;
-}
-
-.event-content-input {
-  flex: 1;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 13px;
-  min-width: 150px;
+  grid-column: 1;
 }
 
 .event-date-input {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.event-content-input {
+  grid-column: 1;
+  width: 100%;
   height: 32px;
+  min-width: 0;
   padding: 0 10px;
   border: 1px solid #ddd;
   border-radius: 4px;
@@ -1295,6 +1305,8 @@ button:disabled {
 }
 
 .event-add-btn {
+  grid-column: 2;
+  grid-row: 2;
   height: 32px;
   padding: 0 16px;
   background: #2196f3;
@@ -1313,53 +1325,65 @@ button:disabled {
 .events-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  margin-top: 6px;
 }
 
 .event-item {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  background: #f9f9f9;
-  border-radius: 4px;
-  border: 1px solid #eee;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e6ebee;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(35, 55, 70, 0.06);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
 }
 
 .event-item:hover {
-  background: #f0f7ff;
-  border-color: #2196f3;
+  border-color: #8bc995;
+  box-shadow: 0 4px 12px rgba(35, 55, 70, 0.1);
+  transform: translateY(-1px);
+}
+
+.event-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .event-time {
-  font-size: 12px;
-  color: #666;
-  min-width: 80px;
+  min-width: 0;
+  color: #8994a0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .event-keypoint-tag {
-  font-size: 11px;
-  color: #4caf50;
-  background: #e8f5e9;
-  padding: 2px 8px;
-  border-radius: 10px;
-  max-width: 100px;
+  max-width: 230px;
   overflow: hidden;
+  padding: 3px 8px;
+  color: #398b4c;
+  background: #eaf7ed;
+  border-radius: 5px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .event-content {
-  flex: 1;
+  width: 100%;
+  color: #303b46;
   font-size: 13px;
-  color: #333;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .event-status {
-  font-size: 11px;
   padding: 3px 10px;
   border-radius: 10px;
-  cursor: pointer;
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -1378,35 +1402,141 @@ button:disabled {
   color: #721c24;
 }
 
-.event-actions {
-  display: flex;
-  gap: 6px;
+.event-status.archived {
+  padding: 5px 9px;
+  background: #e9ecef;
+  color: #6c757d;
+  border-radius: 6px;
+  font-size: 11px;
 }
 
-.event-action-btn {
-  padding: 4px 10px;
-  border: none;
-  border-radius: 3px;
+.event-status-select {
+  width: 50%;
+  min-width: 76px;
+  height: 28px;
+  padding: 0 4px;
+  color: #856404;
+  background: #fff8e5;
+  border: 1px solid #f0d98a;
+  border-radius: 6px;
+  font-size: 11px;
   cursor: pointer;
+}
+
+.events-filter-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  background: #f7f9fa;
+  border: 1px solid #edf0f2;
+  border-radius: 8px;
+}
+
+.events-filter-label {
+  color: #666;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.event-filter-control {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+}
+
+.event-filter-select {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  color: #475462;
+  background: #fff;
+  border: 1px solid #dce3e7;
+  border-radius: 6px;
   font-size: 12px;
 }
 
-.event-edit-btn {
-  background: #2196f3;
-  color: #fff;
+.clear-event-filter-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: #8b969f;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  font-size: 18px;
+  line-height: 24px;
+  cursor: pointer;
 }
 
-.event-edit-btn:hover {
-  background: #0b7dda;
+.clear-event-filter-btn:hover {
+  color: #f44336;
+  background: #fee;
+}
+
+.event-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.event-actions {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.event-action-btn {
+  padding: 2px 3px;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: color 0.2s, background 0.2s;
+}
+
+.event-action-btn:hover {
+  background: #f0f4f6;
+}
+
+.event-edit-btn {
+  color: #2196f3;
+}
+
+.event-archive-btn {
+  color: #6c757d;
 }
 
 .event-delete-btn {
-  background: #f44336;
-  color: #fff;
+  color: #f44336;
+}
+
+.event-edit-btn:hover {
+  color: #0b7dda;
+}
+
+.event-archive-btn:hover {
+  color: #495057;
 }
 
 .event-delete-btn:hover {
-  background: #da190b;
+  color: #d32f2f;
+}
+
+.event-item:has(.event-status.archived) {
+  background: #fafbfb;
+  box-shadow: none;
+  opacity: 0.78;
 }
 
 /* 全局设置图标按钮 */

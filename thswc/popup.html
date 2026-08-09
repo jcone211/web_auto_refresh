@@ -129,6 +129,15 @@
                     <input type="date" id="eventDate" class="event-date-input">
                     <button id="addEventBtn" class="event-add-btn">添加</button>
                 </div>
+                <div class="events-filter-area">
+                    <label class="events-filter-label" for="eventFilterSelect">按要点筛选</label>
+                    <div class="event-filter-control">
+                        <select id="eventFilterSelect" class="event-filter-select">
+                            <option value="">全部要点</option>
+                        </select>
+                        <button type="button" id="clearEventFilterBtn" class="clear-event-filter-btn" title="清除筛选">×</button>
+                    </div>
+                </div>
                 <div class="events-list" id="eventsList">
                     <!-- 事件列表动态渲染 -->
                 </div>
@@ -154,6 +163,13 @@
                 </label>
                 <select id="defaultPortfolioSelect" class="settings-select"></select>
                 <p class="settings-desc">选择后，每次打开弹窗将自动切换到该组合，默认「持仓」</p>
+            </div>
+            <div class="settings-item">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="hideKeyPointsToggle">
+                    <span class="toggle-label">隐藏首页「要点管理」图标</span>
+                </label>
+                <p class="settings-desc">开启后，首页工具栏将不再显示要点管理入口</p>
             </div>
         </div>
     </div>

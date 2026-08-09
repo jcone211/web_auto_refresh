@@ -55,6 +55,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 界面文案与注释使用中文；变量名、消息 action 名使用英文。
 - 消息协议两套字段并存：`action`（控制指令：`startRefresh` / `stopRefresh` / `getStatus` / `refresh` / `setView`）与 `type`（数据上报：`DOCUMENT_CAPTURED`），新增消息沿用此风格。
 
+## 任务处理节奏
+
+- 对小范围功能、样式调整和局部 bug 修复，直接读取相关文件并实现，不默认启动 brainstorming、设计文档、worktree、子代理或多轮代码审查流程。
+- 简单任务的标准流程：修改代码 → 运行必要的语法/差异检查 → 交给用户在 Chrome 扩展中手动验证。
+- 只有在用户明确要求，或任务确实涉及复杂架构、多文件协作、较高回归风险时，才使用 worktree、计划、子代理或完整技能流程。
+- 用户已明确表示会在代码完成后立即手动验证时，不要额外搭建视觉原型或重复执行复杂审查；应直接报告修改内容和验证命令。
+
 <!-- superpowers-zh:begin (do not edit between these markers) -->
 # Superpowers-ZH 中文增强版
 

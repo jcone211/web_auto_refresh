@@ -43,8 +43,10 @@ let keyPoints = []; // 要点列表：[{ text, weight }]
 let editingKeyPointIndex = -1; // 编辑中的要点索引，-1 表示新增模式
 let events = []; // 事件列表：[{ id, keyPointText, content, time, status }]
 let editingEventId = null; // 编辑中的事件 ID，null 表示新增模式
+let eventFilterKeyPoint = ''; // 事件按要点筛选值，'' 表示全部
 let autoResizeWindow = false; // 切换组合时专属窗口自动伸缩
 let defaultPortfolio = '持仓'; // 打开插件时默认显示的组合，默认「持仓」
+let hideKeyPoints = false; // 隐藏首页「要点管理」图标
 
 // 抓取规则（解析在 parsers.js，按域名派发）
 const selectorsEnum = {
@@ -130,12 +132,15 @@ const eventContentInputEl = document.getElementById('eventContent');
 const eventDateInputEl = document.getElementById('eventDate');
 const addEventBtnEl = document.getElementById('addEventBtn');
 const eventsListEl = document.getElementById('eventsList');
+const eventFilterSelectEl = document.getElementById('eventFilterSelect');
+const clearEventFilterBtnEl = document.getElementById('clearEventFilterBtn');
 // 全局设置
 const openSettingsBtnEl = document.getElementById('openSettingsBtn');
 const settingsOverlayEl = document.getElementById('settingsOverlay');
 const closeSettingsBtnEl = document.getElementById('closeSettingsBtn');
 const autoResizeToggleEl = document.getElementById('autoResizeWindowToggle');
 const defaultPortfolioSelectEl = document.getElementById('defaultPortfolioSelect');
+const hideKeyPointsToggleEl = document.getElementById('hideKeyPointsToggle');
 
 // 编辑表单（封装渲染/清空/联动）
 const editForm = createEditForm({
@@ -469,7 +474,7 @@ function promptComboName(message, prefilled) {
 async function handleExport() {
     if (!confirm('将导出插件全部数据和配置（所有组合、要点、事件、设置等），确定继续？')) return;
     const localData = await storageGet(chrome.storage.local, ['stockList', 'portfolios', 'activePortfolio', 'currentView', 'keyPoints', 'events']);
-    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio']);
+    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio', 'hideKeyPoints']);
     const payload = {
         version: 2,
         type: 'full-backup',
@@ -488,6 +493,7 @@ async function handleExport() {
             pageSize: syncData.pageSize,
             autoResizeWindow: syncData.autoResizeWindow,
             defaultPortfolio: syncData.defaultPortfolio,
+            hideKeyPoints: syncData.hideKeyPoints,
         },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -535,6 +541,7 @@ async function handleImport(file) {
         if (typeof data.sync.pageSize === 'number') syncSet.pageSize = data.sync.pageSize;
         if (typeof data.sync.autoResizeWindow === 'boolean') syncSet.autoResizeWindow = data.sync.autoResizeWindow;
         if (typeof data.sync.defaultPortfolio === 'string') syncSet.defaultPortfolio = data.sync.defaultPortfolio;
+        if (typeof data.sync.hideKeyPoints === 'boolean') syncSet.hideKeyPoints = data.sync.hideKeyPoints;
         if (Object.keys(syncSet).length) {
             await new Promise(r => chrome.storage.sync.set(syncSet, r));
         }
@@ -601,8 +608,10 @@ async function initState() {
 // 首次初始化
 initState().then(() => {
     // 加载全局设置（默认组合、自动伸缩开关），应用默认组合后再做首次渲染
-    chrome.storage.sync.get(['defaultPortfolio', 'autoResizeWindow'], (result) => {
+    chrome.storage.sync.get(['defaultPortfolio', 'autoResizeWindow', 'hideKeyPoints'], (result) => {
         autoResizeWindow = !!result.autoResizeWindow;
+        hideKeyPoints = !!result.hideKeyPoints;
+        applyKeyPointsVisibility();
         const dp = result.defaultPortfolio || '持仓';
         // 存储的默认组合若已被删除，回退到固定默认「持仓」
         defaultPortfolio = portfolios[dp] ? dp : '持仓';
@@ -805,7 +814,7 @@ function renderKeyPointsList() {
         item.className = 'keypoint-item';
         item.innerHTML = `
             <span class="keypoint-seq">${idx + 1}、</span>
-            <span class="keypoint-text">${escapeHtml(kp.text)}</span>
+            <span class="keypoint-text" title="点击查看该要点的所有事件记录">${escapeHtml(kp.text)}</span>
             <span class="keypoint-weight">(${kp.weight})</span>
             <div class="keypoint-actions">
                 <button class="keypoint-action-btn keypoint-edit-btn" data-idx="${realIdx}">编辑</button>
@@ -814,6 +823,12 @@ function renderKeyPointsList() {
         `;
         keyPointsListEl.appendChild(item);
     });
+    // 点击要点文本：跳转到对应事件记录列表
+    keyPointsListEl.querySelectorAll('.keypoint-text').forEach(el => {
+        el.addEventListener('click', () => filterEventsByKeyPoint(el.textContent));
+    });
+    // 要点增删改后刷新事件筛选下拉（保留当前选中值）
+    updateEventFilterSelect();
     // 绑定编辑和删除事件
     keyPointsListEl.querySelectorAll('.keypoint-edit-btn').forEach(btn => {
         btn.addEventListener('click', () => editKeyPoint(parseInt(btn.dataset.idx)));
@@ -849,6 +864,7 @@ function closeKeyPoints() {
 // ---------------- 全局设置 ----------------
 function openSettings() {
     autoResizeToggleEl.checked = autoResizeWindow;
+    hideKeyPointsToggleEl.checked = hideKeyPoints;
     // 填充默认组合下拉框（始终有活动组合可选）
     defaultPortfolioSelectEl.innerHTML = '';
     Object.keys(portfolios).forEach(name => {
@@ -859,6 +875,11 @@ function openSettings() {
     });
     defaultPortfolioSelectEl.value = defaultPortfolio;
     settingsOverlayEl.style.display = 'flex';
+}
+
+// 按「隐藏要点管理」开关控制首页要点管理图标的显隐
+function applyKeyPointsVisibility() {
+    openKeyPointsBtnEl.style.display = hideKeyPoints ? 'none' : '';
 }
 
 function closeSettings() {
@@ -948,6 +969,12 @@ defaultPortfolioSelectEl.addEventListener('change', () => {
     chrome.storage.sync.set({ defaultPortfolio });
 });
 
+hideKeyPointsToggleEl.addEventListener('change', () => {
+    hideKeyPoints = hideKeyPointsToggleEl.checked;
+    chrome.storage.sync.set({ hideKeyPoints });
+    applyKeyPointsVisibility();
+});
+
 // 初始化加载要点数据
 loadKeyPoints();
 
@@ -986,34 +1013,58 @@ function updateEventKeyPointSelect() {
     }
 }
 
-// 渲染事件列表（按时间倒序）
+// 渲染事件列表（按时间倒序，支持按要点筛选）
 function renderEventsList() {
     eventsListEl.innerHTML = '';
-    // 按时间倒序排序
-    const sorted = [...events].sort((a, b) => new Date(b.time) - new Date(a.time));
-    if (sorted.length === 0) {
-        eventsListEl.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">暂无事件，请添加</div>';
+    // 按要点筛选
+    const filtered = eventFilterKeyPoint
+        ? events.filter(e => e.keyPointText === eventFilterKeyPoint)
+        : events;
+    if (filtered.length === 0) {
+        eventsListEl.innerHTML = `<div style="text-align:center;color:#999;padding:20px;">${eventFilterKeyPoint ? '该要点暂无事件记录' : '暂无事件，请添加'}</div>`;
         return;
     }
+    // 按时间倒序排序
+    const sorted = [...filtered].sort((a, b) => new Date(b.time) - new Date(a.time));
     sorted.forEach(event => {
         const item = document.createElement('div');
         item.className = 'event-item';
-        const statusText = { pending: '待预测', accurate: '准确', wrong: '误判' }[event.status] || '待预测';
+        const isArchived = event.status === 'archived';
+        // 归档后状态只读展示；未归档用状态下拉框直接设置
+        const statusControl = isArchived
+            ? '<span class="event-status archived">已归档</span>'
+            : `<select class="event-status-select" data-id="${event.id}">
+                <option value="pending" ${event.status === 'pending' ? 'selected' : ''}>待预测</option>
+                <option value="accurate" ${event.status === 'accurate' ? 'selected' : ''}>准确</option>
+                <option value="wrong" ${event.status === 'wrong' ? 'selected' : ''}>误判</option>
+               </select>`;
+        // 归档后不可编辑、不可再改状态，仅保留删除
+        const archiveBtn = isArchived ? '' : `<button class="event-action-btn event-archive-btn" data-id="${event.id}">归档</button>`;
+        const editBtn = isArchived ? '' : `<button class="event-action-btn event-edit-btn" data-id="${event.id}">编辑</button>`;
         item.innerHTML = `
-            <span class="event-time">${event.time}</span>
-            ${event.keyPointText ? `<span class="event-keypoint-tag" title="${escapeHtml(event.keyPointText)}">${escapeHtml(event.keyPointText)}</span>` : ''}
-            <span class="event-content">${escapeHtml(event.content)}</span>
-            <span class="event-status ${event.status}" data-id="${event.id}" title="点击切换状态">${statusText}</span>
-            <div class="event-actions">
-                <button class="event-action-btn event-edit-btn" data-id="${event.id}">编辑</button>
-                <button class="event-action-btn event-delete-btn" data-id="${event.id}">删除</button>
+            <div class="event-meta">
+                <span class="event-time">${event.time}</span>
+                ${event.keyPointText ? `<span class="event-keypoint-tag" title="${escapeHtml(event.keyPointText)}">${escapeHtml(event.keyPointText)}</span>` : ''}
+            </div>
+            <div class="event-content">${escapeHtml(event.content)}</div>
+            <div class="event-footer">
+                ${statusControl}
+                <div class="event-actions">
+                    ${archiveBtn}
+                    ${editBtn}
+                    <button class="event-action-btn event-delete-btn" data-id="${event.id}">删除</button>
+                </div>
             </div>
         `;
         eventsListEl.appendChild(item);
     });
-    // 绑定状态切换事件
-    eventsListEl.querySelectorAll('.event-status').forEach(el => {
-        el.addEventListener('click', () => cycleEventStatus(el.dataset.id));
+    // 绑定状态设置事件
+    eventsListEl.querySelectorAll('.event-status-select').forEach(el => {
+        el.addEventListener('change', () => setEventStatus(el.dataset.id, el.value));
+    });
+    // 绑定归档事件
+    eventsListEl.querySelectorAll('.event-archive-btn').forEach(el => {
+        el.addEventListener('click', () => archiveEvent(el.dataset.id));
     });
     // 绑定编辑和删除事件
     eventsListEl.querySelectorAll('.event-edit-btn').forEach(btn => {
@@ -1024,13 +1075,35 @@ function renderEventsList() {
     });
 }
 
-// 循环切换事件状态：pending -> accurate -> wrong -> pending
-function cycleEventStatus(id) {
+// 刷新「按要点筛选」下拉框（保留当前选中值；被删要点则重置为全部）
+function updateEventFilterSelect() {
+    const stillExists = keyPoints.some(kp => kp.text === eventFilterKeyPoint);
+    if (eventFilterKeyPoint && !stillExists) eventFilterKeyPoint = '';
+    eventFilterSelectEl.innerHTML = '<option value="">全部要点</option>';
+    keyPoints.forEach(kp => {
+        const option = document.createElement('option');
+        option.value = kp.text;
+        option.textContent = kp.text;
+        eventFilterSelectEl.appendChild(option);
+    });
+    eventFilterSelectEl.value = eventFilterKeyPoint || '';
+}
+
+// 直接设置事件状态（替代原点击轮换）
+function setEventStatus(id, status) {
     const event = events.find(e => e.id === id);
-    if (!event) return;
-    const statusOrder = ['pending', 'accurate', 'wrong'];
-    const currentIdx = statusOrder.indexOf(event.status);
-    event.status = statusOrder[(currentIdx + 1) % statusOrder.length];
+    if (!event || event.status === 'archived') return;
+    event.status = status;
+    saveEvents();
+    renderEventsList();
+}
+
+// 归档事件：归档后不可编辑、不可再改状态，仅可删除
+function archiveEvent(id) {
+    const event = events.find(e => e.id === id);
+    if (!event || event.status === 'archived') return;
+    if (!confirm('归档后该事件将无法编辑和修改状态，只能删除。确定归档？')) return;
+    event.status = 'archived';
     saveEvents();
     renderEventsList();
 }
@@ -1099,7 +1172,7 @@ function resetEventForm() {
 }
 
 // 标签页切换
-function switchTab(tab) {
+function switchTab(tab, keepEventContext = false) {
     if (tab === 'keypoints') {
         tabKeyPointsBtnEl.classList.add('active');
         tabEventsBtnEl.classList.remove('active');
@@ -1110,15 +1183,37 @@ function switchTab(tab) {
         tabKeyPointsBtnEl.classList.remove('active');
         tabEventsContentEl.style.display = 'block';
         tabKeyPointsContentEl.style.display = 'none';
+        // 直接点击事件记录 tab 时清空关联要点和筛选条件；跳转时保留对应要点
+        if (!keepEventContext) {
+            eventKeyPointSelectEl.value = '';
+            eventFilterKeyPoint = '';
+        }
         updateEventKeyPointSelect();
+        updateEventFilterSelect();
         renderEventsList();
     }
+}
+
+// 从要点列表点击要点项，跳转到事件记录列表并按该要点筛选
+function filterEventsByKeyPoint(text) {
+    eventFilterKeyPoint = text;
+    eventKeyPointSelectEl.value = text;
+    switchTab('events', true);
 }
 
 // 事件管理事件绑定
 tabKeyPointsBtnEl.addEventListener('click', () => switchTab('keypoints'));
 tabEventsBtnEl.addEventListener('click', () => switchTab('events'));
 addEventBtnEl.addEventListener('click', addOrUpdateEvent);
+eventFilterSelectEl.addEventListener('change', () => {
+    eventFilterKeyPoint = eventFilterSelectEl.value;
+    renderEventsList();
+});
+clearEventFilterBtnEl.addEventListener('click', () => {
+    eventFilterKeyPoint = '';
+    eventFilterSelectEl.value = '';
+    renderEventsList();
+});
 
 // 初始化加载事件数据
 loadEvents();
