@@ -1030,50 +1030,62 @@ function renderEventsList() {
         eventsListEl.innerHTML = `<div style="text-align:center;color:#999;padding:20px;">${eventFilterKeyPoint ? '该要点暂无事件记录' : '暂无事件，请添加'}</div>`;
         return;
     }
-    // 按时间倒序排序
+    // 按日期、要点和状态合并为同一张卡片
     const sorted = [...filtered].sort((a, b) => new Date(b.time) - new Date(a.time));
+    const groups = [];
+    const groupMap = new Map();
     sorted.forEach(event => {
+        const key = [event.time, event.keyPointText || '', event.status, !!event.archived].join(' ');
+        let group = groupMap.get(key);
+        if (!group) {
+            group = { events: [], keyPointText: event.keyPointText || '', time: event.time, status: event.status, archived: !!event.archived };
+            groupMap.set(key, group);
+            groups.push(group);
+        }
+        group.events.push(event);
+    });
+    groups.forEach((group, groupIndex) => {
         const item = document.createElement('div');
         item.className = 'event-item';
-        const isArchived = !!event.archived;
-        // 归档后保留归档前的准确/误判状态展示；未归档仍可下拉设置状态
-        const statusText = event.status === 'accurate' ? '准确' : event.status === 'wrong' ? '误判' : '待预测';
-        const statusControl = isArchived
-            ? `<span class="event-status ${event.status} archived">${statusText}</span>`
-            : `<select class="event-status-select" data-id="${event.id}">
-                <option value="pending" ${event.status === 'pending' ? 'selected' : ''}>待预测</option>
-                <option value="accurate" ${event.status === 'accurate' ? 'selected' : ''}>准确</option>
-                <option value="wrong" ${event.status === 'wrong' ? 'selected' : ''}>误判</option>
+        if (group.archived) item.classList.add('archived');
+        const statusText = group.status === 'accurate' ? '准确' : group.status === 'wrong' ? '误判' : '待预测';
+        const statusControl = group.archived
+            ? `<span class="event-status ${group.status} archived">${statusText}</span>`
+            : `<select class="event-status-select" data-group-index="${groupIndex}">
+                <option value="pending" ${group.status === 'pending' ? 'selected' : ''}>待预测</option>
+                <option value="accurate" ${group.status === 'accurate' ? 'selected' : ''}>准确</option>
+                <option value="wrong" ${group.status === 'wrong' ? 'selected' : ''}>误判</option>
                </select>`;
-        // 只有「准确」和「误判」状态允许归档
-        const canArchive = !isArchived && (event.status === 'accurate' || event.status === 'wrong');
-        const archiveBtn = canArchive ? `<button class="event-action-btn event-archive-btn" data-id="${event.id}">归档</button>` : '';
-        const editBtn = isArchived ? '' : `<button class="event-action-btn event-edit-btn" data-id="${event.id}">编辑</button>`;
+        const canArchive = !group.archived && (group.status === 'accurate' || group.status === 'wrong');
+        const archiveBtn = canArchive ? `<button class="event-icon-btn event-archive-btn" data-group-index="${groupIndex}" title="归档"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v11H4zM3 5h18v3H3zM8 13h8M12 10v7m0 0-3-3m3 3 3-3"/></svg></button>` : '';
+        const contentRows = group.events.map(event => `
+            <div class="event-content-row">
+                <div class="event-content">${escapeHtml(event.content)}</div>
+            </div>
+        `).join('');
+        const rowActions = group.events.map(event => `
+            ${group.archived ? '' : `<button class="event-icon-btn event-edit-btn" data-id="${event.id}" title="编辑"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.7 4.7L8 20l11-11a2.1 2.1 0 0 0-3-3zM14 7l3 3"/></svg></button>`}
+            <button class="event-icon-btn event-delete-btn" data-id="${event.id}" title="删除"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V5h6v2m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg></button>
+        `).join('');
         item.innerHTML = `
             <div class="event-meta">
-                <span class="event-time">${event.time}</span>
-                ${event.keyPointText ? `<span class="event-keypoint-tag" title="${escapeHtml(event.keyPointText)}">${escapeHtml(event.keyPointText)}</span>` : ''}
+                <span class="event-time">${group.time}</span>
+                ${group.keyPointText ? `<span class="event-keypoint-tag" title="${escapeHtml(group.keyPointText)}">${escapeHtml(group.keyPointText)}</span>` : ''}
             </div>
-            <div class="event-content">${escapeHtml(event.content)}</div>
+            <div class="event-content-list">${contentRows}</div>
             <div class="event-footer">
                 ${statusControl}
-                <div class="event-actions">
-                    ${archiveBtn}
-                    ${editBtn}
-                    <button class="event-action-btn event-delete-btn" data-id="${event.id}">删除</button>
-                </div>
+                <div class="event-actions">${archiveBtn}${rowActions}</div>
             </div>
         `;
         eventsListEl.appendChild(item);
     });
-    // 绑定状态设置事件
-    // 绑定状态设置事件
+    // 同一张卡片内的状态和归档操作作用于该卡片的全部事件
     eventsListEl.querySelectorAll('.event-status-select').forEach(el => {
-        el.addEventListener('change', () => setEventStatus(el.dataset.id, el.value));
+        el.addEventListener('change', () => setEventGroupStatus(groups[el.dataset.groupIndex], el.value));
     });
-    // 绑定归档事件
     eventsListEl.querySelectorAll('.event-archive-btn').forEach(el => {
-        el.addEventListener('click', () => archiveEvent(el.dataset.id));
+        el.addEventListener('click', () => archiveEventGroup(groups[el.dataset.groupIndex]));
     });
     // 绑定编辑和删除事件
     eventsListEl.querySelectorAll('.event-edit-btn').forEach(btn => {
@@ -1104,6 +1116,23 @@ function setEventStatus(id, status) {
     if (!event || event.archived) return;
     if (!['pending', 'accurate', 'wrong'].includes(status)) return;
     event.status = status;
+    saveEvents();
+    renderEventsList();
+}
+
+// 批量设置同一卡片内事件的状态
+function setEventGroupStatus(group, status) {
+    if (!group || group.archived || !['pending', 'accurate', 'wrong'].includes(status)) return;
+    group.events.forEach(event => { event.status = status; });
+    saveEvents();
+    renderEventsList();
+}
+
+// 批量归档同一卡片内事件
+function archiveEventGroup(group) {
+    if (!group || group.archived || !['accurate', 'wrong'].includes(group.status)) return;
+    if (!confirm('归档后该卡片内事件将无法编辑和修改状态，只能删除。确定归档？')) return;
+    group.events.forEach(event => { event.archived = true; });
     saveEvents();
     renderEventsList();
 }

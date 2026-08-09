@@ -1372,12 +1372,64 @@ button:disabled {
   white-space: nowrap;
 }
 
+.event-content-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.event-content-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .event-content {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   color: #303b46;
   font-size: 13px;
   line-height: 1.6;
   overflow-wrap: anywhere;
+}
+
+.event-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.event-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: #687078;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.event-icon-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.event-icon-btn:hover {
+  color: #687078;
+  transform: translateY(-2px);
 }
 
 .event-status {
@@ -1488,55 +1540,25 @@ button:disabled {
 .event-actions {
   display: flex;
   flex: 1;
-  gap: 8px;
+  gap: 2px;
   flex-wrap: nowrap;
   justify-content: flex-end;
   white-space: nowrap;
 }
 
-.event-action-btn {
-  padding: 2px 3px;
-  border: 0;
-  background: transparent;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  white-space: nowrap;
-  transition: color 0.2s, background 0.2s;
-}
-
-.event-action-btn:hover {
-  background: #f0f4f6;
-}
-
-.event-edit-btn {
-  color: #2196f3;
-}
-
-.event-archive-btn {
-  color: #6c757d;
-}
-
-.event-delete-btn {
-  color: #f44336;
-}
-
-.event-edit-btn:hover {
-  color: #0b7dda;
-}
-
-.event-archive-btn:hover {
-  color: #495057;
-}
-
-.event-delete-btn:hover {
-  color: #d32f2f;
-}
-
+.event-item.archived,
 .event-item:has(.event-status.archived) {
   background: #fafbfb;
   box-shadow: none;
   opacity: 0.78;
+}
+
+@media (min-width: 520px) {
+  .events-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
 }
 
 /* 全局设置图标按钮 */
