@@ -587,7 +587,8 @@ async function initState() {
             selectorEl.value = selectorName;
             stockList = response.stockList || [];
             pageSize = response.pageSize || 10;
-            currentView = response.currentView || 'list';
+            currentView = 'list'; // 每次打开弹窗固定股票列表视图，不记忆上次的垃圾池
+            chrome.runtime.sendMessage({ action: 'setView', view: 'list' }); // 同步后台视图与存储，调度仍按股票列表
             portfolios = response.portfolios || {};
             activePortfolio = response.activePortfolio || '持仓';
             updateStatus(false);
