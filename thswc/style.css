@@ -1485,3 +1485,16 @@ button:disabled {
   color: #888;
   line-height: 1.5;
 }
+
+/* 全局设置里的组合下拉框 */
+.settings-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  margin-top: 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  background: #fff;
+  cursor: pointer;
+}

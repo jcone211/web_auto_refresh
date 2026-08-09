@@ -8,7 +8,7 @@ const DEBUG = false;
 const dbg = (...args) => { if (DEBUG) console.log('[thswc:bg]', ...args); };
 
 // 后台服务worker，处理定时刷新逻辑
-let refreshInterval = 30; // 默认30秒
+let refreshInterval = 60; // 默认60秒
 let selectorName = '';
 let currentView = 'list'; // 当前列表视图：'list' 股票列表 | 'trash' 垃圾池
 let popupPort = null;
@@ -212,7 +212,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             chrome.storage.local.get(['stockList', 'portfolios', 'activePortfolio'], (localResult) => {
                 chrome.storage.sync.get(['refreshInterval', 'selectorName', 'pageSize'], (syncResult) => {
                     sendResponse({
-                        refreshInterval: syncResult.refreshInterval,
+                        refreshInterval: Number.isFinite(syncResult.refreshInterval) ? syncResult.refreshInterval : 60,
                         selectorName: syncResult.selectorName,
                         pageSize: syncResult.pageSize || 10,
                         currentView,

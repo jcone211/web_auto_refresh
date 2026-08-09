@@ -44,6 +44,7 @@ let editingKeyPointIndex = -1; // 编辑中的要点索引，-1 表示新增模�
 let events = []; // 事件列表：[{ id, keyPointText, content, time, status }]
 let editingEventId = null; // 编辑中的事件 ID，null 表示新增模式
 let autoResizeWindow = false; // 切换组合时专属窗口自动伸缩
+let defaultPortfolio = '持仓'; // 打开插件时默认显示的组合，默认「持仓」
 
 // 抓取规则（解析在 parsers.js，按域名派发）
 const selectorsEnum = {
@@ -134,6 +135,7 @@ const openSettingsBtnEl = document.getElementById('openSettingsBtn');
 const settingsOverlayEl = document.getElementById('settingsOverlay');
 const closeSettingsBtnEl = document.getElementById('closeSettingsBtn');
 const autoResizeToggleEl = document.getElementById('autoResizeWindowToggle');
+const defaultPortfolioSelectEl = document.getElementById('defaultPortfolioSelect');
 
 // 编辑表单（封装渲染/清空/联动）
 const editForm = createEditForm({
@@ -467,7 +469,7 @@ function promptComboName(message, prefilled) {
 async function handleExport() {
     if (!confirm('将导出插件全部数据和配置（所有组合、要点、事件、设置等），确定继续？')) return;
     const localData = await storageGet(chrome.storage.local, ['stockList', 'portfolios', 'activePortfolio', 'currentView', 'keyPoints', 'events']);
-    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize']);
+    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio']);
     const payload = {
         version: 2,
         type: 'full-backup',
@@ -484,6 +486,8 @@ async function handleExport() {
             refreshInterval: syncData.refreshInterval,
             selectorName: syncData.selectorName,
             pageSize: syncData.pageSize,
+            autoResizeWindow: syncData.autoResizeWindow,
+            defaultPortfolio: syncData.defaultPortfolio,
         },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -529,6 +533,8 @@ async function handleImport(file) {
         if (typeof data.sync.refreshInterval === 'number') syncSet.refreshInterval = data.sync.refreshInterval;
         if (typeof data.sync.selectorName === 'string') syncSet.selectorName = data.sync.selectorName;
         if (typeof data.sync.pageSize === 'number') syncSet.pageSize = data.sync.pageSize;
+        if (typeof data.sync.autoResizeWindow === 'boolean') syncSet.autoResizeWindow = data.sync.autoResizeWindow;
+        if (typeof data.sync.defaultPortfolio === 'string') syncSet.defaultPortfolio = data.sync.defaultPortfolio;
         if (Object.keys(syncSet).length) {
             await new Promise(r => chrome.storage.sync.set(syncSet, r));
         }
@@ -574,7 +580,9 @@ async function initState() {
     return new Promise((resolve) => {
         chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
             if (!response) { resolve(); return; }
-            intervalInput.value = response.refreshInterval || 60;
+            intervalInput.value = Number.isFinite(response.refreshInterval)
+                ? response.refreshInterval
+                : 60;
             selectorName = response.selectorName || 'wc1';
             selectorEl.value = selectorName;
             stockList = response.stockList || [];
@@ -591,14 +599,29 @@ async function initState() {
 
 // 首次初始化
 initState().then(() => {
-    refreshCombos();
-    renderStockList();
-    // 组合标签行渲染后补一次 resize，修正初始高度差值（不受设置开关限制）
-    const count = stockList.filter(s => currentView === 'trash' ? s.inTrash : !s.inTrash).length;
-    chrome.runtime.sendMessage({ action: 'resizePopupWindow', rows: Math.min(count, pageSize) });
-    // 加载全局设置
-    chrome.storage.sync.get(['autoResizeWindow'], (result) => {
+    // 加载全局设置（默认组合、自动伸缩开关），应用默认组合后再做首次渲染
+    chrome.storage.sync.get(['defaultPortfolio', 'autoResizeWindow'], (result) => {
         autoResizeWindow = !!result.autoResizeWindow;
+        const dp = result.defaultPortfolio || '持仓';
+        // 存储的默认组合若已被删除，回退到固定默认「持仓」
+        defaultPortfolio = portfolios[dp] ? dp : '持仓';
+        // 默认组合有效且与当前不同时，打开弹窗直接切到该组合（覆盖上次关闭时的组合）
+        if (portfolios[dp] && dp !== activePortfolio) {
+            activePortfolio = dp;
+            stockList = portfolios[dp].stockList || [];
+            selectorName = portfolios[dp].selectorName || 'wc1';
+            selectorEl.value = selectorName;
+            chrome.storage.local.set({ activePortfolio, stockList });
+            chrome.storage.sync.set({ selectorName });
+            currentPage = 1;
+            currentSort = 'default';
+            chrome.runtime.sendMessage({ action: 'refresh' }); // 监控运行中则立即按新组合重排刷新任务
+        }
+        refreshCombos();
+        renderStockList();
+        // 组合标签行渲染后补一次 resize，修正初始高度差值（不受设置开关限制）
+        const count = stockList.filter(s => currentView === 'trash' ? s.inTrash : !s.inTrash).length;
+        chrome.runtime.sendMessage({ action: 'resizePopupWindow', rows: Math.min(count, pageSize) });
     });
 });
 
@@ -627,6 +650,15 @@ selectorEl.addEventListener('change', () => {
     chrome.storage.local.set({ portfolios });
     renderStockList();
     chrome.runtime.sendMessage({ action: 'refresh' });
+});
+
+// 刷新间隔输入即改即存：原先只在点「开始」时写入 storage，改值后直接关闭弹窗
+// 会丢改动、重开时回到旧值；改为 change 时立即持久化（监控周期仍以点「开始」生效）
+intervalInput.addEventListener('change', () => {
+    const v = parseInt(intervalInput.value, 10);
+    if (Number.isFinite(v)) {
+        chrome.storage.sync.set({ refreshInterval: v });
+    }
 });
 
 startBtn.addEventListener('click', () => {
@@ -816,6 +848,15 @@ function closeKeyPoints() {
 // ---------------- 全局设置 ----------------
 function openSettings() {
     autoResizeToggleEl.checked = autoResizeWindow;
+    // 填充默认组合下拉框（始终有活动组合可选）
+    defaultPortfolioSelectEl.innerHTML = '';
+    Object.keys(portfolios).forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        defaultPortfolioSelectEl.appendChild(opt);
+    });
+    defaultPortfolioSelectEl.value = defaultPortfolio;
     settingsOverlayEl.style.display = 'flex';
 }
 
@@ -899,6 +940,11 @@ settingsOverlayEl.addEventListener('click', (e) => {
 autoResizeToggleEl.addEventListener('change', () => {
     autoResizeWindow = autoResizeToggleEl.checked;
     chrome.storage.sync.set({ autoResizeWindow });
+});
+
+defaultPortfolioSelectEl.addEventListener('change', () => {
+    defaultPortfolio = defaultPortfolioSelectEl.value;
+    chrome.storage.sync.set({ defaultPortfolio });
 });
 
 // 初始化加载要点数据
