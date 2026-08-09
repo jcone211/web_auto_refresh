@@ -982,7 +982,13 @@ loadKeyPoints();
 // 加载事件数据
 function loadEvents() {
     chrome.storage.local.get(['events'], (result) => {
-        events = result.events || [];
+        events = (result.events || []).map(event => {
+            // 兼容旧版：旧版将归档写入 status，无法恢复归档前状态时默认按「准确」处理
+            if (event.status === 'archived') {
+                return { ...event, status: 'accurate', archived: true };
+            }
+            return { ...event, archived: !!event.archived };
+        });
         renderEventsList();
         updateEventKeyPointSelect();
     });
@@ -1029,17 +1035,19 @@ function renderEventsList() {
     sorted.forEach(event => {
         const item = document.createElement('div');
         item.className = 'event-item';
-        const isArchived = event.status === 'archived';
-        // 归档后状态只读展示；未归档用状态下拉框直接设置
+        const isArchived = !!event.archived;
+        // 归档后保留归档前的准确/误判状态展示；未归档仍可下拉设置状态
+        const statusText = event.status === 'accurate' ? '准确' : event.status === 'wrong' ? '误判' : '待预测';
         const statusControl = isArchived
-            ? '<span class="event-status archived">已归档</span>'
+            ? `<span class="event-status ${event.status} archived">${statusText}</span>`
             : `<select class="event-status-select" data-id="${event.id}">
                 <option value="pending" ${event.status === 'pending' ? 'selected' : ''}>待预测</option>
                 <option value="accurate" ${event.status === 'accurate' ? 'selected' : ''}>准确</option>
                 <option value="wrong" ${event.status === 'wrong' ? 'selected' : ''}>误判</option>
                </select>`;
-        // 归档后不可编辑、不可再改状态，仅保留删除
-        const archiveBtn = isArchived ? '' : `<button class="event-action-btn event-archive-btn" data-id="${event.id}">归档</button>`;
+        // 只有「准确」和「误判」状态允许归档
+        const canArchive = !isArchived && (event.status === 'accurate' || event.status === 'wrong');
+        const archiveBtn = canArchive ? `<button class="event-action-btn event-archive-btn" data-id="${event.id}">归档</button>` : '';
         const editBtn = isArchived ? '' : `<button class="event-action-btn event-edit-btn" data-id="${event.id}">编辑</button>`;
         item.innerHTML = `
             <div class="event-meta">
@@ -1058,6 +1066,7 @@ function renderEventsList() {
         `;
         eventsListEl.appendChild(item);
     });
+    // 绑定状态设置事件
     // 绑定状态设置事件
     eventsListEl.querySelectorAll('.event-status-select').forEach(el => {
         el.addEventListener('change', () => setEventStatus(el.dataset.id, el.value));
@@ -1092,18 +1101,19 @@ function updateEventFilterSelect() {
 // 直接设置事件状态（替代原点击轮换）
 function setEventStatus(id, status) {
     const event = events.find(e => e.id === id);
-    if (!event || event.status === 'archived') return;
+    if (!event || event.archived) return;
+    if (!['pending', 'accurate', 'wrong'].includes(status)) return;
     event.status = status;
     saveEvents();
     renderEventsList();
 }
 
-// 归档事件：归档后不可编辑、不可再改状态，仅可删除
+// 归档事件：仅「准确」和「误判」状态可归档，归档后保留原状态且仅可删除
 function archiveEvent(id) {
     const event = events.find(e => e.id === id);
-    if (!event || event.status === 'archived') return;
+    if (!event || event.archived || !['accurate', 'wrong'].includes(event.status)) return;
     if (!confirm('归档后该事件将无法编辑和修改状态，只能删除。确定归档？')) return;
-    event.status = 'archived';
+    event.archived = true;
     saveEvents();
     renderEventsList();
 }
@@ -1123,7 +1133,8 @@ function addOrUpdateEvent() {
             keyPointText,
             content,
             time,
-            status: 'pending'
+            status: 'pending',
+            archived: false
         });
     } else {
         // 编辑模式
@@ -1142,7 +1153,7 @@ function addOrUpdateEvent() {
 // 编辑事件
 function editEvent(id) {
     const event = events.find(e => e.id === id);
-    if (!event) return;
+    if (!event || event.archived) return;
     eventKeyPointSelectEl.value = event.keyPointText || '';
     eventContentInputEl.value = event.content;
     eventDateInputEl.value = event.time;
