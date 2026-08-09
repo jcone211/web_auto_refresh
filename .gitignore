@@ -5,6 +5,7 @@
 .aider*
 .continue/
 .cody/
+opencode.json
 
 # 密钥和凭证
 *.pem
