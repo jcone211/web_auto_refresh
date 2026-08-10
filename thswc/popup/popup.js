@@ -2,6 +2,7 @@ import {
     Mutex, getDateTime, normalizeUrl, stripSign, numOrNull,
     calcImportPercent, selectorKeyForUrl, effectiveStockUrl, etfPrefixForCode
 } from '../shared/utils.js';
+import { validateCronExpr } from '../shared/cron.js';
 import { parseWc1, parseXq1 } from './parsers.js';
 import { applyThresholds } from './notifications.js';
 import { renderStock, renderPagination, renderSortToggles, renderComboSwitches } from './render.js';
@@ -47,6 +48,8 @@ let eventFilterKeyPoint = ''; // 事件按要点筛选值，'' 表示全部
 let autoResizeWindow = false; // 切换组合时专属窗口自动伸缩
 let defaultPortfolio = '持仓'; // 打开插件时默认显示的组合，默认「持仓」
 let hideKeyPoints = false; // 隐藏首页「要点管理」图标
+let dataSource = 'refresh'; // 数据获取方式：'refresh' 刷新页面获取 | 'api' 调用 API 直取（未实现）
+let cronJobs = []; // 定时全量刷新：[{ id, expr, enabled }]，最多 3 个
 
 // 抓取规则（解析在 parsers.js，按域名派发）
 const selectorsEnum = {
@@ -72,6 +75,7 @@ const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const selectorEl = document.getElementById('selectorName');
 const addStockEl = document.getElementById('addStock');
+const refreshAllBtnEl = document.getElementById('refreshAllBtn');
 const overlayEl = document.getElementById('stockEditOverlay');
 const closeBtnEl = overlayEl.querySelector('.close-btn');
 const lastMonitorEl = document.getElementById('lastMonitor');
@@ -141,6 +145,9 @@ const closeSettingsBtnEl = document.getElementById('closeSettingsBtn');
 const autoResizeToggleEl = document.getElementById('autoResizeWindowToggle');
 const defaultPortfolioSelectEl = document.getElementById('defaultPortfolioSelect');
 const hideKeyPointsToggleEl = document.getElementById('hideKeyPointsToggle');
+const dataSourceSelectEl = document.getElementById('dataSourceSelect');
+const cronJobListEl = document.getElementById('cronJobList');
+const addCronJobBtnEl = document.getElementById('addCronJobBtn');
 
 // 编辑表单（封装渲染/清空/联动）
 const editForm = createEditForm({
@@ -191,17 +198,27 @@ async function handleCaptured(message) {
         const index = stockList.findIndex(item =>
             stripSign(item.url) === strippedMsg
             || stripSign(effectiveStockUrl(item, selectorName)) === strippedMsg);
+        // 当前组合未命中时，继续到其他组合查找（一键/cron 全量刷新会刷新全部组合，
+        // 非活动组合的数据也要落库；命中多只同 URL 股票时一并更新）
+        const others = [];
         if (index === -1) {
+            for (const name of Object.keys(portfolios)) {
+                if (name === activePortfolio) continue;
+                const p = portfolios[name];
+                const sn = p.selectorName || 'wc1'; // 各组合独立的选择器
+                for (const s of p.stockList || []) {
+                    if (stripSign(s.url) === strippedMsg
+                        || stripSign(effectiveStockUrl(s, sn)) === strippedMsg) {
+                        others.push(s);
+                    }
+                }
+            }
+        }
+        if (index === -1 && others.length === 0) {
             console.warn('[thswc:popup] URL 匹配失败!\n  来址(剔sign):', stripSign(messageUrl),
                 '\n  已存列表:', stockList.map(s => ({ 原始: s.url, 剔sign: stripSign(s.url) })));
             return;
         }
-        const stock = stockList[index];
-        if (stock.stopRunning) {
-            dbg('该股票已停止，跳过解析:', messageUrl);
-            return; // 已停止：不解析、不通知
-        }
-
         if (!message.documentData.html) return;
         const doc = new DOMParser().parseFromString(message.documentData.html, 'text/html');
         // 解析规则按股票 url 域名派发（与下拉选择无关，支持混站点）
@@ -214,21 +231,35 @@ async function handleCaptured(message) {
             return;
         }
         dbg('解析成功:', key, JSON.stringify(parsed));
-        stock.name = parsed.name;
-        if (parsed.code) stock.code = parsed.code;
-        if (parsed.prefix) stock.prefix = parsed.prefix;
-        if (parsed.startPrice != null) stock.startPrice = parsed.startPrice;
-        if (parsed.currentPrice != null) {
-            stock.currentPrice = parsed.currentPrice;
-            if (stock.importPrice == null) stock.importPrice = parsed.currentPrice; // 初始价格首次回填
+        // 应用到命中的全部股票（当前组合 + 其他组合同 URL 的），已停止的跳过
+        const targets = [];
+        if (index !== -1) targets.push(stockList[index]);
+        targets.push(...others);
+        const activeTargets = targets.filter(s => !s.stopRunning);
+        if (activeTargets.length === 0) {
+            dbg('命中的股票均已停止，跳过解析写入:', messageUrl);
+            return;
         }
-        if (parsed.percent != null) stock.percent = parsed.percent;
-        stock.lastUpdateAt = message.documentData.timestamp || Date.now(); // 股票级最新刷新时间
-        applyThresholds(stock);
+        activeTargets.forEach(stock => {
+            stock.name = parsed.name;
+            if (parsed.code) stock.code = parsed.code;
+            if (parsed.prefix) stock.prefix = parsed.prefix;
+            if (parsed.startPrice != null) stock.startPrice = parsed.startPrice;
+            if (parsed.currentPrice != null) {
+                stock.currentPrice = parsed.currentPrice;
+                if (stock.importPrice == null) stock.importPrice = parsed.currentPrice; // 初始价格首次回填
+            }
+            if (parsed.percent != null) stock.percent = parsed.percent;
+            stock.lastUpdateAt = message.documentData.timestamp || Date.now(); // 股票级最新刷新时间
+            applyThresholds(stock);
+        });
         lastUpdateTimeEl.textContent = getDateTime();
         // 同步写回活动组合，避免切换组合时读到旧价格
         if (portfolios[activePortfolio]) portfolios[activePortfolio].stockList = stockList;
-        chrome.storage.local.set({ stockList, portfolios }, () => renderStockList());
+        chrome.storage.local.set({ stockList, portfolios }, () => {
+            // 仅命中当前组合时重渲染列表（其他组合数据已落库，不影响当前视图）
+            if (index !== -1) renderStockList();
+        });
     } catch (err) {
         console.error('数据更新错误:', err);
         lastUpdateTimeEl.textContent = '数据更新失败 ' + getDateTime();
@@ -474,7 +505,7 @@ function promptComboName(message, prefilled) {
 async function handleExport() {
     if (!confirm('将导出插件全部数据和配置（所有组合、要点、事件、设置等），确定继续？')) return;
     const localData = await storageGet(chrome.storage.local, ['stockList', 'portfolios', 'activePortfolio', 'currentView', 'keyPoints', 'events']);
-    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio', 'hideKeyPoints']);
+    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio', 'hideKeyPoints', 'dataSource', 'cronJobs']);
     const payload = {
         version: 2,
         type: 'full-backup',
@@ -494,6 +525,8 @@ async function handleExport() {
             autoResizeWindow: syncData.autoResizeWindow,
             defaultPortfolio: syncData.defaultPortfolio,
             hideKeyPoints: syncData.hideKeyPoints,
+            dataSource: syncData.dataSource,
+            cronJobs: syncData.cronJobs || [],
         },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -542,6 +575,8 @@ async function handleImport(file) {
         if (typeof data.sync.autoResizeWindow === 'boolean') syncSet.autoResizeWindow = data.sync.autoResizeWindow;
         if (typeof data.sync.defaultPortfolio === 'string') syncSet.defaultPortfolio = data.sync.defaultPortfolio;
         if (typeof data.sync.hideKeyPoints === 'boolean') syncSet.hideKeyPoints = data.sync.hideKeyPoints;
+        if (data.sync.dataSource === 'refresh' || data.sync.dataSource === 'api') syncSet.dataSource = data.sync.dataSource;
+        if (Array.isArray(data.sync.cronJobs)) syncSet.cronJobs = data.sync.cronJobs;
         if (Object.keys(syncSet).length) {
             await new Promise(r => chrome.storage.sync.set(syncSet, r));
         }
@@ -553,6 +588,7 @@ async function handleImport(file) {
     refreshCombos();
     loadKeyPoints();
     loadEvents();
+    chrome.runtime.sendMessage({ action: 'syncCronJobs' }); // 恢复的 cron 配置立即生效
     alert('导入完成，全部数据已恢复');
 }
 
@@ -874,7 +910,75 @@ function openSettings() {
         defaultPortfolioSelectEl.appendChild(opt);
     });
     defaultPortfolioSelectEl.value = defaultPortfolio;
+    // 数据获取方式与 cron 定时任务（每次打开读取最新，跨弹窗会话同步）
+    chrome.storage.sync.get(['dataSource', 'cronJobs'], (result) => {
+        dataSource = result.dataSource || 'refresh';
+        cronJobs = Array.isArray(result.cronJobs) ? result.cronJobs : [];
+        dataSourceSelectEl.value = dataSource;
+        renderCronJobList();
+    });
     settingsOverlayEl.style.display = 'flex';
+}
+
+// ---------------- cron 定时任务（最多 3 个） ----------------
+function renderCronJobList() {
+    cronJobListEl.innerHTML = '';
+    cronJobs.forEach((job, idx) => {
+        const row = document.createElement('div');
+        row.className = 'cron-job-row';
+        // 表达式输入：失焦校验，无效还原不保存
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'cron-expr-input';
+        input.placeholder = '分 时 日 月 周，如 0 9 * * 1-5';
+        input.value = job.expr || '';
+        input.title = 'cron 表达式：分 时 日 月 周（日/周任一满足即触发）';
+        input.addEventListener('change', () => {
+            const v = input.value.trim();
+            if (!validateCronExpr(v)) {
+                alert('cron 表达式无效。格式：分 时 日 月 周，如 0 9 * * 1-5');
+                input.value = cronJobs[idx].expr || '';
+                return;
+            }
+            cronJobs[idx].expr = v;
+            saveCronJobs();
+        });
+        // 启用开关
+        const enableLabel = document.createElement('label');
+        enableLabel.className = 'cron-enable';
+        const enableCb = document.createElement('input');
+        enableCb.type = 'checkbox';
+        enableCb.checked = !!job.enabled;
+        enableCb.addEventListener('change', () => {
+            cronJobs[idx].enabled = enableCb.checked;
+            saveCronJobs();
+        });
+        enableLabel.appendChild(enableCb);
+        enableLabel.appendChild(document.createTextNode('启用'));
+        // 删除按钮
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'cron-del-btn';
+        delBtn.textContent = '×';
+        delBtn.title = '删除该定时任务';
+        delBtn.addEventListener('click', () => {
+            if (!confirm('删除该定时任务？')) return;
+            cronJobs.splice(idx, 1);
+            renderCronJobList();
+            saveCronJobs();
+        });
+        row.appendChild(input);
+        row.appendChild(enableLabel);
+        row.appendChild(delBtn);
+        cronJobListEl.appendChild(row);
+    });
+    addCronJobBtnEl.disabled = cronJobs.length >= 3;
+}
+
+// 保存 cron 配置并让 background 按最新配置重排
+function saveCronJobs() {
+    chrome.storage.sync.set({ cronJobs });
+    chrome.runtime.sendMessage({ action: 'syncCronJobs' });
 }
 
 // 按「隐藏要点管理」开关控制首页要点管理图标的显隐
@@ -973,6 +1077,34 @@ hideKeyPointsToggleEl.addEventListener('change', () => {
     hideKeyPoints = hideKeyPointsToggleEl.checked;
     chrome.storage.sync.set({ hideKeyPoints });
     applyKeyPointsVisibility();
+});
+
+// 数据获取方式：API 直取未实现，仅预留配置
+dataSourceSelectEl.addEventListener('change', () => {
+    dataSource = dataSourceSelectEl.value;
+    chrome.storage.sync.set({ dataSource });
+    if (dataSource === 'api') {
+        alert('「调用 API 直取」功能开发中，暂不生效；当前仅作为预留配置');
+    }
+});
+
+// 一键刷新：全部组合的全部股票（排除已停止的），与监控运行状态无关
+refreshAllBtnEl.addEventListener('click', () => {
+    chrome.storage.sync.get('dataSource', ({ dataSource: ds }) => {
+        if (ds === 'api') { alert('当前数据获取方式为「调用 API 直取」（开发中），暂不可用'); return; }
+        chrome.runtime.sendMessage({ action: 'refreshAll' }, (resp) => {
+            if (resp && resp.status === 'ok') {
+                alert(`已触发全量刷新，共 ${resp.count} 只股票（已排除停止中的股票）。稍等片刻，时间根据股票数量决定`);
+            }
+        });
+    });
+});
+
+// 添加 cron 定时任务（最多 3 个）
+addCronJobBtnEl.addEventListener('click', () => {
+    if (cronJobs.length >= 3) return;
+    cronJobs.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), expr: '', enabled: true });
+    renderCronJobList();
 });
 
 // 初始化加载要点数据

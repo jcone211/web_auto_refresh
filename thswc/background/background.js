@@ -1,4 +1,5 @@
 import { stripSign, effectiveStockUrl, isKnownMarketPrefix } from '../shared/utils.js';
+import { nextCronTime } from '../shared/cron.js';
 
 // 默认组合（不可删除、不可重命名）
 const DEFAULT_PORTFOLIOS = ['默认', '持仓', '观察'];
@@ -15,6 +16,13 @@ let popupPort = null;
 
 // 各股票一次性刷新 alarm 的名称前缀
 const STOCK_ALARM_PREFIX = 'refreshStock:';
+// cron 定时器一次性 alarm 的名称前缀
+const CRON_ALARM_PREFIX = 'cronJob:';
+// 全量刷新（一键/cron）后抓取放开的窗口（毫秒）：监控未运行时也允许解析，
+// 覆盖所有标签页加载+抓取的时间（逐支打开，耗时与股票数量成正比，按 5 分钟放宽）；
+// 超过窗口仍未关闭的旧抓取继续按丢弃处理
+const ALLOW_CAPTURE_WINDOW_MS = 300000;
+let allowCapturedUntil = 0;
 
 init();
 
@@ -96,7 +104,7 @@ chrome.windows.onRemoved.addListener((closedWindowId) => {
     });
 });
 
-// 初始化：先做幂等迁移，再加载设置
+// 初始化：先做幂等迁移，再加载设置，并补排 cron 定时器
 function init() {
     ensureMigrated().then(() => {
         chrome.storage.sync.get(['refreshInterval', 'selectorName'], (result) => {
@@ -107,6 +115,7 @@ function init() {
                 selectorName = result.selectorName;
             }
         });
+        scheduleCronAlarms(); // SW 冷启动时 cron 一次性 alarm 由浏览器托管不丢，此处仅兜底补排
     });
 }
 
@@ -251,12 +260,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'resizePopupWindow') {
         resizePopupWindow(request.rows || 0);
         sendResponse({ status: 'ok' });
+    } else if (request.action === 'refreshAll') {
+        // 一键/定时全量刷新：聚合全部组合的股票，立即触发（与监控运行状态无关）
+        refreshAllStocks((count) => sendResponse({ status: 'ok', count }));
+        return true; // 异步 sendResponse
+    } else if (request.action === 'syncCronJobs') {
+        // cron 配置变更（增删/启停/表达式修改）后重排全部一次性 alarm
+        scheduleCronAlarms();
+        sendResponse({ status: 'ok' });
     } else if (request.type === 'DOCUMENT_CAPTURED') {
         // 停止监控（无 refreshTimer）后，已打开标签页里的 content script 仍会因
         // 行情页 DOM 实时变动持续上报；此时直接丢弃，不转发 popup，
-        // 否则「停止」后上次更新时间仍会随页面变动往前走
+        // 否则「停止」后上次更新时间仍会随页面变动往前走。
+        // 例外：全量刷新（一键/cron）触发的抓取在窗口期内放行，保证未点开始时也能更新数据
         chrome.alarms.get('refreshTimer', (alarm) => {
-            if (!alarm) {
+            if (!alarm && Date.now() > allowCapturedUntil) {
                 sendResponse({ status: 'ignored-not-running' });
                 return;
             }
@@ -292,6 +310,9 @@ function stopRefresh() {
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'refreshTimer') {
         scheduleStockAlarms();
+    } else if (alarm.name.startsWith(CRON_ALARM_PREFIX)) {
+        // cron 定时器到点：按最新 sync 配置处理（与股票 alarm 反查 storage 一致）
+        handleCronAlarm(alarm.name.slice(CRON_ALARM_PREFIX.length));
     } else if (alarm.name.startsWith(STOCK_ALARM_PREFIX)) {
         const url = alarm.name.slice(STOCK_ALARM_PREFIX.length);
         // 直接从 storage 读最新列表/视图/选择器，避免 service worker 冷启动时状态缺失；
@@ -352,7 +373,8 @@ function refreshStockTab(url) {
 }
 
 // 创建专属窗口并打开标签页（创建后立即最小化，不占屏幕空间）
-function createStockWindowAndOpenTab(url) {
+// done：可选回调，窗口创建完成后调用（全量刷新串行等待用）
+function createStockWindowAndOpenTab(url, done) {
     chrome.windows.create({
         url: url,
         type: 'normal',
@@ -365,6 +387,7 @@ function createStockWindowAndOpenTab(url) {
             chrome.windows.update(newWindow.id, { state: 'minimized' });
             dbg('创建专属窗口:', newWindow.id);
         }
+        done && done();
     });
 }
 
@@ -392,6 +415,110 @@ function resizePopupWindow(rows) {
             const newHeight = 514 + Math.max(rows - 2, 0) * 56;
             chrome.windows.update(popupWindowId, { height: newHeight });
             dbg('弹窗调整高度:', newHeight, 'rows=', rows);
+        });
+    });
+}
+
+// ---------------- cron 定时器（全局设置，最多 3 个） ----------------
+
+// 重排全部 cron 一次性 alarm（先清空再重建，幂等）
+function scheduleCronAlarms() {
+    chrome.storage.sync.get(['cronJobs'], ({ cronJobs }) => {
+        chrome.alarms.getAll((alarms) => {
+            alarms.filter(a => a.name.startsWith(CRON_ALARM_PREFIX))
+                .forEach(a => chrome.alarms.clear(a.name));
+            (cronJobs || []).forEach(job => scheduleOneCron(job));
+        });
+    });
+}
+
+// 为单个 cron 任务排下一次触发（按 cron 表达式计算，一次性 alarm，由浏览器托管）
+function scheduleOneCron(job) {
+    if (!job || !job.enabled || !job.expr) return;
+    const next = nextCronTime(job.expr, Date.now());
+    if (next === null) {
+        console.warn('[thswc:bg] cron 表达式无法满足，已跳过排程:', job.expr);
+        return;
+    }
+    chrome.alarms.create(CRON_ALARM_PREFIX + job.id, { when: next });
+    dbg('cron 排程:', job.expr, '→', new Date(next).toLocaleString('zh-CN'));
+}
+
+// cron 定时器到点：先重排下一次（避免 SW 回收断档），再按数据获取方式执行。
+// dataSource=api（API 直取）尚未实现，暂不动作
+function handleCronAlarm(id) {
+    chrome.storage.sync.get(['cronJobs', 'dataSource'], ({ cronJobs, dataSource }) => {
+        const job = (cronJobs || []).find(j => j.id === id);
+        if (!job || !job.enabled) return;
+        scheduleOneCron(job);
+        if ((dataSource || 'refresh') === 'refresh') {
+            dbg('cron 触发全量刷新:', job.expr);
+            refreshAllStocks();
+        } else {
+            dbg('cron 触发但数据获取方式为 api（未实现），跳过刷新:', job.expr);
+        }
+    });
+}
+
+// ---------------- 全量刷新（一键 / cron 共用） ----------------
+
+// 聚合全部组合的股票：排除 stopRunning，按生效地址跨组合去重，
+// 每次只打开/刷新 1 支，间隔 0.5-1.2s 随机（避免一次性打开全部页面造成压力），
+// 窗口不存在则新建（含首支股票），已存在则复用；
+// 完成后经回调返回实际刷新数量。刷新期间放开「未运行即丢弃」的抓取窗口
+function refreshAllStocks(done) {
+    allowCapturedUntil = Date.now() + ALLOW_CAPTURE_WINDOW_MS;
+    chrome.storage.local.get(['portfolios'], ({ portfolios }) => {
+        const seen = new Set();
+        const urls = [];
+        Object.keys(portfolios || {}).forEach(name => {
+            const p = portfolios[name];
+            const sn = p.selectorName || 'wc1'; // 各组合独立的选择器
+            (p.stockList || []).forEach(s => {
+                if (s.stopRunning) return;
+                const url = stripSign(effectiveStockUrl(s, sn));
+                if (!url || seen.has(url)) return;
+                seen.add(url);
+                urls.push(url);
+            });
+        });
+        dbg('全量刷新: 共', urls.length, '只股票', urls);
+        if (urls.length === 0) { done && done(0); return; }
+        let count = 0;
+        const queue = urls.slice();
+        const step = () => {
+            if (queue.length === 0) { done && done(count); return; }
+            const url = queue.shift();
+            openOrRefreshStockTab(url).then(() => {
+                count++;
+                if (queue.length > 0) {
+                    setTimeout(step, 500 + Math.random() * 700); // 0.5-1.2s 随机间隔
+                } else {
+                    step(); // 最后一支立即收尾
+                }
+            });
+        };
+        step();
+    });
+}
+
+// 打开/刷新单支股票（Promise 化，供全量刷新串行调用）；
+// 窗口不存在则新建（含该股票），已存在则复用，逻辑与监控路径 refreshStockTab 一致
+function openOrRefreshStockTab(url) {
+    return new Promise((resolve) => {
+        chrome.storage.local.get('stockWindowId', ({ stockWindowId }) => {
+            if (stockWindowId) {
+                chrome.windows.get(stockWindowId, (window) => {
+                    if (chrome.runtime.lastError || !window) {
+                        createStockWindowAndOpenTab(url, resolve);
+                    } else {
+                        openOrRefreshTabInWindow(stockWindowId, url);
+                        resolve();
+                    }
+                });
+            } else {
+                createStockWindowAndOpenTab(url, resolve);
+            }
         });
     });
 }

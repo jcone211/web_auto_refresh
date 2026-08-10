@@ -76,11 +76,12 @@ body {
   flex-wrap: wrap;
 }
 
+/* 工具栏间距：图标按钮间收紧到 2px */
 .toolbar-actions {
   flex: 1;
   justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
 }
 
 /* 「+」留在左侧，开始/停止右浮动 */
@@ -1071,15 +1072,30 @@ button:disabled {
 
 /* 文档图标按钮 */
 .doc-icon-btn {
-  font-size: 16px;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 3px 4px;
   border-radius: 4px;
   transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .doc-icon-btn:hover {
-  background: #e8f5e9;
+  background: #f1f3f5;
+}
+
+/* 工具栏图标（刷新/要点/设置，统一规格） */
+.doc-icon {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+/* 全局设置图标与右侧「开始」按钮间增加间距（在 gap 2px 基础上再加 6px） */
+#openSettingsBtn {
+  margin-right: 6px;
 }
 
 /* 要点管理弹窗 */
@@ -1561,19 +1577,6 @@ button:disabled {
   }
 }
 
-/* 全局设置图标按钮 */
-.settings-icon-btn {
-  font-size: 16px;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: background 0.2s;
-}
-
-.settings-icon-btn:hover {
-  background: #e3f2fd;
-}
-
 /* 全局设置弹窗 */
 .settings-model {
   position: fixed;
@@ -1649,4 +1652,101 @@ button:disabled {
   font-size: 13px;
   background: #fff;
   cursor: pointer;
+}
+
+/* 全局设置里的按钮（添加定时任务） */
+.settings-btn {
+  margin-top: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #2196f3;
+  color: #2196f3;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+
+.settings-btn:hover {
+  background: #e3f2fd;
+}
+
+.settings-btn:disabled {
+  color: #bbb;
+  border-color: #ddd;
+  background: #f5f5f5;
+  cursor: not-allowed;
+}
+
+/* cron 定时任务列表 */
+.cron-job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cron-job-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cron-expr-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.cron-expr-input:focus {
+  border-color: #2196f3;
+  outline: none;
+}
+
+.cron-enable {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #555;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.cron-enable input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.cron-del-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  color: #999;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.cron-del-btn:hover {
+  color: #e53935;
+  background: #fdecea;
+}
+
+.settings-desc code {
+  background: #f5f5f5;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: Consolas, "Courier New", monospace;
 }

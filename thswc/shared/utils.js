@@ -129,13 +129,13 @@ export function stripSign(url) {
     }
 }
 
-// 最新刷新时间戳(ms) → dd.MM HH:mm（不带年，如 08.04 09:30），无效返回 ''
+// 最新刷新时间戳(ms) → MM.dd HH:mm（不带年，如 08.04 09:30 表示 8月4日），无效返回 ''
 export function formatLastUpdate(ts) {
     const n = Number(ts);
     if (!Number.isFinite(n) || n <= 0) return '';
     const d = new Date(n);
     const p = x => String(x).padStart(2, '0');
-    return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 // 时间戳(ms) → YYYY-MM-DD HH:mm，无效返回 '-'

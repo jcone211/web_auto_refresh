@@ -41,8 +41,9 @@
             </div>
             <div class="container toolbar-actions">
                 <div class="create-link tool-btn" id="addStock">+</div>
-                <div class="tool-btn doc-icon-btn" id="openKeyPointsBtn" title="要点管理">📄</div>
-                <div class="tool-btn settings-icon-btn" id="openSettingsBtn" title="全局设置">⚙️</div>
+                <div class="tool-btn doc-icon-btn" id="refreshAllBtn" title="一键刷新全部组合的全部股票"><img src="icons/refresh.svg" alt="一键刷新" class="doc-icon"></div>
+                <div class="tool-btn doc-icon-btn" id="openKeyPointsBtn" title="要点管理"><img src="icons/keypoints.svg" alt="要点管理" class="doc-icon"></div>
+                <div class="tool-btn doc-icon-btn" id="openSettingsBtn" title="全局设置"><img src="icons/settings.svg" alt="全局设置" class="doc-icon"></div>
                 <div class="switch-group">
                     <button id="startBtn" class="tool-btn active">开始</button>
                     <button id="stopBtn" class="tool-btn" disabled>停止</button>
@@ -170,6 +171,24 @@
                     <span class="toggle-label">隐藏首页「要点管理」图标</span>
                 </label>
                 <p class="settings-desc">开启后，首页工具栏将不再显示要点管理入口</p>
+            </div>
+            <div class="settings-item">
+                <label class="settings-toggle" for="dataSourceSelect">
+                    <span class="toggle-label">数据获取方式</span>
+                </label>
+                <select id="dataSourceSelect" class="settings-select">
+                    <option value="refresh">刷新页面获取</option>
+                    <option value="api">调用 API 直取（开发中）</option>
+                </select>
+                <p class="settings-desc">默认「刷新页面获取」：到点刷新股票页面，抓取数据后写入；
+                    「调用 API 直取」为预留配置，功能开发中，暂不生效</p>
+            </div>
+            <div class="settings-item">
+                <span class="toggle-label">定时全量刷新（cron，最多 3 个）</span>
+                <div id="cronJobList" class="cron-job-list"></div>
+                <button type="button" id="addCronJobBtn" class="settings-btn">+ 添加定时任务</button>
+                <p class="settings-desc">格式：分 时 日 月 周（如 <code>0 9 * * 1-5</code> 表示工作日 9:00）；
+                    日/周同时指定时需同时满足；到点自动刷新全部组合股票</p>
             </div>
         </div>
     </div>
