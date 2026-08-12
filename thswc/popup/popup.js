@@ -231,11 +231,15 @@ async function handleCaptured(message) {
             return;
         }
         dbg('解析成功:', key, JSON.stringify(parsed));
-        // 应用到命中的全部股票（当前组合 + 其他组合同 URL 的），已停止的跳过
+        // 应用到命中的全部股票（当前组合 + 其他组合同 URL 的）；
+        // 全量刷新（带 fullRefresh 标记）忽略单只股票的停止刷新，全部写入；
+        // 监控周期的抓取仍跳过已停止的股票（其不被调度刷新）
         const targets = [];
         if (index !== -1) targets.push(stockList[index]);
         targets.push(...others);
-        const activeTargets = targets.filter(s => !s.stopRunning);
+        const activeTargets = message.documentData.fullRefresh
+            ? targets
+            : targets.filter(s => !s.stopRunning);
         if (activeTargets.length === 0) {
             dbg('命中的股票均已停止，跳过解析写入:', messageUrl);
             return;
@@ -1094,7 +1098,7 @@ refreshAllBtnEl.addEventListener('click', () => {
         if (ds === 'api') { alert('当前数据获取方式为「调用 API 直取」（开发中），暂不可用'); return; }
         chrome.runtime.sendMessage({ action: 'refreshAll' }, (resp) => {
             if (resp && resp.status === 'ok') {
-                alert(`已触发全量刷新，共 ${resp.count} 只股票（已排除停止中的股票）。稍等片刻，时间根据股票数量决定`);
+                alert(`已触发全量刷新，共 ${resp.count} 只股票。稍等片刻，时间根据股票数量决定`);
             }
         });
     });

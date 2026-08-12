@@ -280,6 +280,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
             dbg('收到抓取, popupPort 已连接=' + !!popupPort, request.documentData.url);
             if (popupPort) {
+                // 全量刷新窗口内：给抓取打标记，popup 据此对已停止的股票也解析写入
+                // （全量刷新忽略单只股票的停止刷新，故其数据须同步更新）
+                if (Date.now() <= allowCapturedUntil) {
+                    request.documentData.fullRefresh = true;
+                }
                 popupPort.postMessage(request);
             }
             sendResponse({ status: 'received', forwarded: !!popupPort });
@@ -462,9 +467,9 @@ function handleCronAlarm(id) {
 
 // ---------------- 全量刷新（一键 / cron 共用） ----------------
 
-// 聚合全部组合的股票：排除 stopRunning，按生效地址跨组合去重，
-// 每次只打开/刷新 1 支，间隔 0.5-1.2s 随机（避免一次性打开全部页面造成压力），
-// 窗口不存在则新建（含首支股票），已存在则复用；
+// 聚合全部组合的股票：忽略单只股票的「停止刷新」标记，全部刷新；
+// 按生效地址跨组合去重，每次只打开/刷新 1 支，间隔 0.5-1.2s 随机
+// （避免一次性打开全部页面造成压力），窗口不存在则新建（含首支股票），已存在则复用；
 // 完成后经回调返回实际刷新数量。刷新期间放开「未运行即丢弃」的抓取窗口
 function refreshAllStocks(done) {
     allowCapturedUntil = Date.now() + ALLOW_CAPTURE_WINDOW_MS;
@@ -475,7 +480,6 @@ function refreshAllStocks(done) {
             const p = portfolios[name];
             const sn = p.selectorName || 'wc1'; // 各组合独立的选择器
             (p.stockList || []).forEach(s => {
-                if (s.stopRunning) return;
                 const url = stripSign(effectiveStockUrl(s, sn));
                 if (!url || seen.has(url)) return;
                 seen.add(url);
