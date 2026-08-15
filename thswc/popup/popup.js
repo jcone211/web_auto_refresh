@@ -20,6 +20,7 @@ function connectPort() {
         return;
     }
     port.onMessage.addListener(handleCaptured);
+    port.onMessage.addListener(handleApiQuotes);
     port.onDisconnect.addListener(() => setTimeout(connectPort, 500));
 }
 connectPort();
@@ -138,14 +139,17 @@ const addEventBtnEl = document.getElementById('addEventBtn');
 const eventsListEl = document.getElementById('eventsList');
 const eventFilterSelectEl = document.getElementById('eventFilterSelect');
 const clearEventFilterBtnEl = document.getElementById('clearEventFilterBtn');
+const eventAccuracyEl = document.getElementById('eventAccuracy');
 // 全局设置
 const openSettingsBtnEl = document.getElementById('openSettingsBtn');
 const settingsOverlayEl = document.getElementById('settingsOverlay');
 const closeSettingsBtnEl = document.getElementById('closeSettingsBtn');
 const autoResizeToggleEl = document.getElementById('autoResizeWindowToggle');
 const defaultPortfolioSelectEl = document.getElementById('defaultPortfolioSelect');
-const hideKeyPointsToggleEl = document.getElementById('hideKeyPointsToggle');
+const showKeyPointsToggleEl = document.getElementById('showKeyPointsToggle');
 const dataSourceSelectEl = document.getElementById('dataSourceSelect');
+const apiKeyInputEl = document.getElementById('apiKeyInput');
+const apiKeyGroupEl = document.getElementById('apiKeyGroup');
 const cronJobListEl = document.getElementById('cronJobList');
 const addCronJobBtnEl = document.getElementById('addCronJobBtn');
 
@@ -270,6 +274,65 @@ async function handleCaptured(message) {
     } finally {
         mutex.unlock();
     }
+}
+
+// API 批量行情落地（background 经 port 转发）：按 code 跨组合匹配更新，
+// 与 handleCaptured 走同一 mutex，避免与页面抓取并发写
+async function handleApiQuotes(message) {
+    if (message.type !== 'API_QUOTES_CAPTURED') return;
+    await mutex.lock();
+    try {
+        const quotes = message.quotes || [];
+        if (quotes.length === 0) return;
+        // 收集全部组合中带 code 的股票（当前组合 + 其他组合）
+        const codeMap = new Map(); // code -> [stock...]
+        const collect = (list) => {
+            (list || []).forEach(s => {
+                const c = String(s.code || '').trim();
+                if (!c) return;
+                if (!codeMap.has(c)) codeMap.set(c, []);
+                codeMap.get(c).push(s);
+            });
+        };
+        collect(stockList);
+        Object.keys(portfolios).forEach(name => {
+            if (name === activePortfolio) return; // 当前组合已收集
+            collect(portfolios[name].stockList);
+        });
+        const updated = [];
+        quotes.forEach(q => {
+            const c = String(q.code || '').trim();
+            const targets = codeMap.get(c);
+            if (!targets) return;
+            targets.forEach(s => { applyQuoteToStock(s, q); updated.push(s); });
+        });
+        if (updated.length === 0) {
+            dbg('API 行情无匹配股票（code 不一致或尚未抓取）:', quotes.length, '条');
+            return;
+        }
+        updated.forEach(s => applyThresholds(s));
+        lastUpdateTimeEl.textContent = getDateTime();
+        if (portfolios[activePortfolio]) portfolios[activePortfolio].stockList = stockList;
+        chrome.storage.local.set({ stockList, portfolios }, () => renderStockList());
+        dbg('API 行情已更新:', updated.length, '只');
+    } catch (err) {
+        console.error('API 数据更新错误:', err);
+        lastUpdateTimeEl.textContent = '数据更新失败 ' + getDateTime();
+    } finally {
+        mutex.unlock();
+    }
+}
+
+// API 行情字段映射到股票条目（开盘价取 open，涨跌幅取 change_pct）
+function applyQuoteToStock(stock, q) {
+    if (q.name) stock.name = q.name;
+    if (q.price != null) {
+        stock.currentPrice = q.price;
+        if (stock.importPrice == null) stock.importPrice = q.price; // 初始价格首次回填
+    }
+    if (q.change_pct != null) stock.percent = q.change_pct;
+    if (q.open != null) stock.startPrice = q.open;
+    stock.lastUpdateAt = Date.now(); // 股票级最新刷新时间
 }
 
 // ---------------- 列表渲染 ----------------
@@ -579,7 +642,7 @@ async function handleImport(file) {
         if (typeof data.sync.autoResizeWindow === 'boolean') syncSet.autoResizeWindow = data.sync.autoResizeWindow;
         if (typeof data.sync.defaultPortfolio === 'string') syncSet.defaultPortfolio = data.sync.defaultPortfolio;
         if (typeof data.sync.hideKeyPoints === 'boolean') syncSet.hideKeyPoints = data.sync.hideKeyPoints;
-        if (data.sync.dataSource === 'refresh' || data.sync.dataSource === 'api') syncSet.dataSource = data.sync.dataSource;
+        if (['refresh', 'xiaoshi', 'adata'].includes(data.sync.dataSource)) syncSet.dataSource = data.sync.dataSource;
         if (Array.isArray(data.sync.cronJobs)) syncSet.cronJobs = data.sync.cronJobs;
         if (Object.keys(syncSet).length) {
             await new Promise(r => chrome.storage.sync.set(syncSet, r));
@@ -904,7 +967,7 @@ function closeKeyPoints() {
 // ---------------- 全局设置 ----------------
 function openSettings() {
     autoResizeToggleEl.checked = autoResizeWindow;
-    hideKeyPointsToggleEl.checked = hideKeyPoints;
+    showKeyPointsToggleEl.checked = !hideKeyPoints;
     // 填充默认组合下拉框（始终有活动组合可选）
     defaultPortfolioSelectEl.innerHTML = '';
     Object.keys(portfolios).forEach(name => {
@@ -914,14 +977,21 @@ function openSettings() {
         defaultPortfolioSelectEl.appendChild(opt);
     });
     defaultPortfolioSelectEl.value = defaultPortfolio;
-    // 数据获取方式与 cron 定时任务（每次打开读取最新，跨弹窗会话同步）
-    chrome.storage.sync.get(['dataSource', 'cronJobs'], (result) => {
-        dataSource = result.dataSource || 'refresh';
+    // 数据获取方式 / API Key / cron 定时任务（每次打开读取最新，跨弹窗会话同步）
+    chrome.storage.sync.get(['dataSource', 'apiKey', 'cronJobs'], (result) => {
+        dataSource = result.dataSource || 'adata';
         cronJobs = Array.isArray(result.cronJobs) ? result.cronJobs : [];
         dataSourceSelectEl.value = dataSource;
+        apiKeyInputEl.value = result.apiKey || '';
+        updateApiKeyGroupVisibility();
         renderCronJobList();
     });
     settingsOverlayEl.style.display = 'flex';
+}
+
+// API Key 组仅数据获取方式为「小石大数据」时显示（新浪/腾讯公开接口无需 Key）
+function updateApiKeyGroupVisibility() {
+    apiKeyGroupEl.style.display = dataSource === 'xiaoshi' ? '' : 'none';
 }
 
 // ---------------- cron 定时任务（最多 3 个） ----------------
@@ -1077,32 +1147,77 @@ defaultPortfolioSelectEl.addEventListener('change', () => {
     chrome.storage.sync.set({ defaultPortfolio });
 });
 
-hideKeyPointsToggleEl.addEventListener('change', () => {
-    hideKeyPoints = hideKeyPointsToggleEl.checked;
+// 「显示要点图标」默认勾选；取消勾选 = 隐藏（存储键仍为 hideKeyPoints，兼容旧数据）
+showKeyPointsToggleEl.addEventListener('change', () => {
+    hideKeyPoints = !showKeyPointsToggleEl.checked;
     chrome.storage.sync.set({ hideKeyPoints });
     applyKeyPointsVisibility();
 });
 
-// 数据获取方式：API 直取未实现，仅预留配置
+// 数据获取方式：refresh 页面刷新 / api 批量行情接口
 dataSourceSelectEl.addEventListener('change', () => {
     dataSource = dataSourceSelectEl.value;
     chrome.storage.sync.set({ dataSource });
-    if (dataSource === 'api') {
-        alert('「调用 API 直取」功能开发中，暂不生效；当前仅作为预留配置');
-    }
+    updateApiKeyGroupVisibility();
 });
 
-// 一键刷新：全部组合的全部股票（排除已停止的），与监控运行状态无关
+// API Key：即改即存（Key 仅存本地，不随导出备份）
+apiKeyInputEl.addEventListener('change', () => {
+    chrome.storage.sync.set({ apiKey: apiKeyInputEl.value.trim() });
+});
+
+// 一键刷新：全部组合的全部股票（含已停止的），与监控运行状态无关；
+// 数据获取方式为 xiaoshi（需 API Key）或 adata（新浪/腾讯公开接口）时走 API 批量行情
 refreshAllBtnEl.addEventListener('click', () => {
-    chrome.storage.sync.get('dataSource', ({ dataSource: ds }) => {
-        if (ds === 'api') { alert('当前数据获取方式为「调用 API 直取」（开发中），暂不可用'); return; }
+    chrome.storage.sync.get(['dataSource', 'apiKey'], ({ dataSource: ds, apiKey }) => {
+        const mode = ds || 'adata';
+        const isApi = mode === 'xiaoshi' || mode === 'adata';
+        // 点击立即反馈：本地聚合可刷新股票数，不等到 background 全部执行完
+        const n = isApi ? countAllCodes() : countAllStocks();
+        if (n === 0) {
+            alert(isApi ? '当前没有可通过 API 刷新的股票（需 6 位数字代码）' : '当前没有可刷新的股票');
+            return;
+        }
+        if (mode === 'xiaoshi' && !apiKey) {
+            alert('请先在全局设置中填写小石大数据 API Key');
+            return;
+        }
+        alert(`将刷新 ${n} 支股票，请稍等片刻，时间根据股票数量决定`);
         chrome.runtime.sendMessage({ action: 'refreshAll' }, (resp) => {
             if (resp && resp.status === 'ok') {
-                alert(`已触发全量刷新，共 ${resp.count} 只股票。稍等片刻，时间根据股票数量决定`);
+                alert('刷新结束，将在 1 分钟内全部完成');
             }
         });
     });
 });
+
+// 本地聚合全部组合的股票数（与 background refreshAllStocks 聚合逻辑一致：
+// 含已停止的股票，按生效地址跨组合去重）
+function countAllStocks() {
+    const seen = new Set();
+    Object.keys(portfolios).forEach(name => {
+        const p = portfolios[name];
+        const sn = p.selectorName || 'wc1';
+        (p.stockList || []).forEach(s => {
+            const url = stripSign(effectiveStockUrl(s, sn));
+            if (url && !seen.has(url)) seen.add(url);
+        });
+    });
+    return seen.size;
+}
+
+// API 模式下可刷新的股票数：有 6 位数字 code 的股票（跨组合去重，排除港股）
+function countAllCodes() {
+    const seen = new Set();
+    Object.keys(portfolios).forEach(name => {
+        (portfolios[name].stockList || []).forEach(s => {
+            if (s.prefix === 'HK') return;
+            const c = String(s.code || '').trim();
+            if (/^\d{6}$/.test(c) && !seen.has(c)) seen.add(c);
+        });
+    });
+    return seen.size;
+}
 
 // 添加 cron 定时任务（最多 3 个）
 addCronJobBtnEl.addEventListener('click', () => {
@@ -1166,15 +1281,20 @@ function renderEventsList() {
         eventsListEl.innerHTML = `<div style="text-align:center;color:#999;padding:20px;">${eventFilterKeyPoint ? '该要点暂无事件记录' : '暂无事件，请添加'}</div>`;
         return;
     }
-    // 按日期、要点和状态合并为同一张卡片
+    // 按日期、要点和状态合并为同一张卡片；只有已归档的事件才合并，
+    // 未归档的事件每条独立成组（保持可独立编辑/改状态）
     const sorted = [...filtered].sort((a, b) => new Date(b.time) - new Date(a.time));
     const groups = [];
     const groupMap = new Map();
     sorted.forEach(event => {
-        const key = [event.time, event.keyPointText || '', event.status, !!event.archived].join(' ');
+        if (!event.archived) {
+            groups.push({ events: [event], keyPointText: event.keyPointText || '', time: event.time, status: event.status, archived: false });
+            return;
+        }
+        const key = [event.time, event.keyPointText || '', event.status, true].join(' ');
         let group = groupMap.get(key);
         if (!group) {
-            group = { events: [], keyPointText: event.keyPointText || '', time: event.time, status: event.status, archived: !!event.archived };
+            group = { events: [], keyPointText: event.keyPointText || '', time: event.time, status: event.status, archived: true };
             groupMap.set(key, group);
             groups.push(group);
         }
@@ -1230,6 +1350,14 @@ function renderEventsList() {
     eventsListEl.querySelectorAll('.event-delete-btn').forEach(btn => {
         btn.addEventListener('click', () => deleteEvent(btn.dataset.id));
     });
+    // 准确率：当前筛选下已归档事件的准确占比（准确且已归档 / 已归档）
+    const archivedPool = filtered.filter(e => e.archived);
+    if (archivedPool.length === 0) {
+        eventAccuracyEl.textContent = '准确率 -';
+    } else {
+        const accurateCount = archivedPool.filter(e => e.status === 'accurate').length;
+        eventAccuracyEl.textContent = `准确率 ${Math.round(accurateCount / archivedPool.length * 100)}%`;
+    }
 }
 
 // 刷新「按要点筛选」下拉框（保留当前选中值；被删要点则重置为全部）

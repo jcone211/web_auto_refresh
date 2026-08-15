@@ -1,5 +1,7 @@
 import { stripSign, effectiveStockUrl, isKnownMarketPrefix } from '../shared/utils.js';
 import { nextCronTime } from '../shared/cron.js';
+import { batchQuotes } from '../js/xiaoshi_realtime_quote.js';
+import { batchQuotes as adataBatchQuotes } from '../js/adata_realtime_quote.js';
 
 // 默认组合（不可删除、不可重命名）
 const DEFAULT_PORTFOLIOS = ['默认', '持仓', '观察'];
@@ -124,7 +126,7 @@ function init() {
 function ensureMigrated() {
     if (ensureMigrated.promise) return ensureMigrated.promise;
     ensureMigrated.promise = new Promise((resolve) => {
-        chrome.storage.local.get(['stockList', 'currentView', 'portfolios', 'activePortfolio'], (localResult) => {
+        chrome.storage.local.get(['stockList', 'currentView', 'portfolios', 'activePortfolio', 'keyPoints', 'events'], (localResult) => {
             if (localResult.currentView) {
                 currentView = localResult.currentView;
             }
@@ -149,17 +151,22 @@ function ensureMigrated() {
 
                     const activePortfolio = localResult.activePortfolio || '持仓';
 
-                    // 要点和事件：首次初始化默认数据（幂等）
-                    const keyPoints = localResult.keyPoints || [
-                        { text: '跌到波段新低放量', weight: 10 },
-                        { text: '波段新底暴跌但缩量', weight: 9 },
-                        { text: 'MACD底背离', weight: 2 }
-                    ];
-                    const events = localResult.events || [
-                        { id: 'demo001', keyPointText: '波段新底暴跌但缩量', content: '恒瑞医药机会', time: '2025-07-17', status: 'accurate' }
-                    ];
-
-                    chrome.storage.local.set({ stockList: migratedList, portfolios, activePortfolio, keyPoints, events }, resolve);
+                    // 要点和事件：仅当键不存在时写入默认数据（幂等，绝不覆盖已有数据——
+                    // 不使用「读回再写回」，避免极端时序下用旧值覆盖 popup 刚保存的新值）
+                    const write = { stockList: migratedList, portfolios, activePortfolio };
+                    if (!('keyPoints' in localResult)) {
+                        write.keyPoints = [
+                            { text: '跌到波段新低放量', weight: 10 },
+                            { text: '波段新底暴跌但缩量', weight: 9 },
+                            { text: 'MACD底背离', weight: 2 }
+                        ];
+                    }
+                    if (!('events' in localResult)) {
+                        write.events = [
+                            { id: 'demo001', keyPointText: '波段新底暴跌但缩量', content: '恒瑞医药机会', time: '2025-07-17', status: 'accurate' }
+                        ];
+                    }
+                    chrome.storage.local.set(write, resolve);
                 });
             };
             if ('stockList' in localResult) {
@@ -314,7 +321,21 @@ function stopRefresh() {
 // 定时器触发时刷新页面
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'refreshTimer') {
-        scheduleStockAlarms();
+        // 选择器为「调用 API 直取（不打开页面）」时，周期刷新走全局配置的 API 方式
+        // 批量获取行情，不排页面刷新 alarm；否则按页面刷新调度
+        chrome.storage.sync.get(['selectorName', 'dataSource'], ({ selectorName: sn, dataSource: ds }) => {
+            if (sn === 'api') {
+                const mode = ds || 'adata';
+                dbg('API 直取模式周期刷新:', mode);
+                if (mode === 'xiaoshi') {
+                    refreshAllByApi(batchQuotes, 'apiKey', null, true);
+                } else {
+                    refreshAllByApi(adataBatchQuotes, null, null, true);
+                }
+            } else {
+                scheduleStockAlarms();
+            }
+        });
     } else if (alarm.name.startsWith(CRON_ALARM_PREFIX)) {
         // cron 定时器到点：按最新 sync 配置处理（与股票 alarm 反查 storage 一致）
         handleCronAlarm(alarm.name.slice(CRON_ALARM_PREFIX.length));
@@ -449,29 +470,42 @@ function scheduleOneCron(job) {
     dbg('cron 排程:', job.expr, '→', new Date(next).toLocaleString('zh-CN'));
 }
 
-// cron 定时器到点：先重排下一次（避免 SW 回收断档），再按数据获取方式执行。
-// dataSource=api（API 直取）尚未实现，暂不动作
+// cron 定时器到点：先重排下一次（避免 SW 回收断档），再执行全量刷新
+// （具体走页面刷新还是 API 由数据获取方式决定，见 refreshAllStocks）
 function handleCronAlarm(id) {
-    chrome.storage.sync.get(['cronJobs', 'dataSource'], ({ cronJobs, dataSource }) => {
+    chrome.storage.sync.get(['cronJobs'], ({ cronJobs }) => {
         const job = (cronJobs || []).find(j => j.id === id);
         if (!job || !job.enabled) return;
         scheduleOneCron(job);
-        if ((dataSource || 'refresh') === 'refresh') {
-            dbg('cron 触发全量刷新:', job.expr);
-            refreshAllStocks();
-        } else {
-            dbg('cron 触发但数据获取方式为 api（未实现），跳过刷新:', job.expr);
-        }
+        dbg('cron 触发全量刷新:', job.expr);
+        refreshAllStocks();
     });
 }
 
 // ---------------- 全量刷新（一键 / cron 共用） ----------------
 
-// 聚合全部组合的股票：忽略单只股票的「停止刷新」标记，全部刷新；
-// 按生效地址跨组合去重，每次只打开/刷新 1 支，间隔 0.5-1.2s 随机
+// 全量刷新入口：按数据获取方式分发——
+//   refresh（默认）：逐支刷新股票页面
+//   xiaoshi：小石大数据批量行情接口（需 apiKey）
+//   adata：新浪/腾讯公开行情（无需 Key）
+function refreshAllStocks(done) {
+    chrome.storage.sync.get('dataSource', ({ dataSource: ds }) => {
+        const mode = ds || 'adata';
+        if (mode === 'xiaoshi') {
+            refreshAllByApi(batchQuotes, 'apiKey', done, false);
+        } else if (mode === 'adata') {
+            refreshAllByApi(adataBatchQuotes, null, done, false);
+        } else {
+            refreshAllByTabs(done);
+        }
+    });
+}
+
+// 页面刷新方式：聚合全部组合的股票，忽略「停止刷新」标记，全部刷新；
+// 按生效地址跨组合去重，每次只打开/刷新 1 支，间隔 1.2-2.8s 随机
 // （避免一次性打开全部页面造成压力），窗口不存在则新建（含首支股票），已存在则复用；
 // 完成后经回调返回实际刷新数量。刷新期间放开「未运行即丢弃」的抓取窗口
-function refreshAllStocks(done) {
+function refreshAllByTabs(done) {
     allowCapturedUntil = Date.now() + ALLOW_CAPTURE_WINDOW_MS;
     chrome.storage.local.get(['portfolios'], ({ portfolios }) => {
         const seen = new Set();
@@ -496,13 +530,64 @@ function refreshAllStocks(done) {
             openOrRefreshStockTab(url).then(() => {
                 count++;
                 if (queue.length > 0) {
-                    setTimeout(step, 500 + Math.random() * 700); // 0.5-1.2s 随机间隔
+                    setTimeout(step, 1200 + Math.random() * 1600); // 1.2-2.8s 随机间隔
                 } else {
                     step(); // 最后一支立即收尾
                 }
             });
         };
         step();
+    });
+}
+
+// API 方式：聚合股票 code（跨组合去重，排除港股——接口仅支持 A股）后调用对应批量
+// 行情模块，结果经 port 转交 popup 更新数据；
+// keyName 为所需存储键（adata 等公开接口传 null 跳过 Key 检查）；
+// filter=true 时为定时监控语义：仅当前视图 + 非停止的股票（与页面刷新调度同款过滤）；
+// 请求发起后经回调返回请求股票数（数据落地由 popup 完成，与页面刷新模式一致）
+function refreshAllByApi(quoteFn, keyName, done, filter) {
+    const getKey = keyName
+        ? new Promise((resolve) => chrome.storage.sync.get(keyName, (res) => resolve(res[keyName] || '')))
+        : Promise.resolve('');
+    getKey.then((apiKey) => {
+        if (keyName && !apiKey) {
+            console.warn('[thswc:bg] 数据获取方式需配置', keyName, '，跳过刷新');
+            done && done(0);
+            return;
+        }
+        chrome.storage.local.get(['portfolios', 'currentView'], ({ portfolios, currentView }) => {
+            const v = currentView || 'list';
+            const seen = new Set();
+            const codes = [];
+            Object.keys(portfolios || {}).forEach(name => {
+                (portfolios[name].stockList || []).forEach(s => {
+                    if (s.prefix === 'HK') return; // 接口不支持港股
+                    const c = String(s.code || '').trim();
+                    if (!/^\d{6}$/.test(c) || seen.has(c)) return;
+                    // 定时监控过滤：仅当前视图 + 非停止
+                    if (filter) {
+                        if (s.stopRunning) return;
+                        if (v === 'trash' ? !s.inTrash : s.inTrash) return;
+                    }
+                    seen.add(c);
+                    codes.push(c);
+                });
+            });
+            dbg('API 刷新: 共', codes.length, '个代码', codes, filter ? '(定时监控过滤)' : '(全量)');
+            if (codes.length === 0) { done && done(0); return; }
+            quoteFn(codes, { apiKey })
+                .then((r) => {
+                    dbg('API 行情返回:', r.count, '只，缺失:', (r.missing_codes || []).join(',') || '无');
+                    if (popupPort) {
+                        popupPort.postMessage({ type: 'API_QUOTES_CAPTURED', quotes: r.items, requested: codes.length });
+                    }
+                    done && done(codes.length);
+                })
+                .catch((err) => {
+                    console.error('[thswc:bg] API 行情获取失败:', err);
+                    done && done(0);
+                });
+        });
     });
 }
 

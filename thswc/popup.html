@@ -22,6 +22,7 @@
             <select class="small-input" id="selectorName">
                 <option value="wc1">同花顺问财</option>
                 <option value="xq1">雪球</option>
+                <option value="api">调用 API 直取（不打开页面）</option>
             </select>
         </div>
         <div>
@@ -41,9 +42,12 @@
             </div>
             <div class="container toolbar-actions">
                 <div class="create-link tool-btn" id="addStock">+</div>
-                <div class="tool-btn doc-icon-btn" id="refreshAllBtn" title="一键刷新全部组合的全部股票"><img src="icons/refresh.svg" alt="一键刷新" class="doc-icon"></div>
-                <div class="tool-btn doc-icon-btn" id="openKeyPointsBtn" title="要点管理"><img src="icons/keypoints.svg" alt="要点管理" class="doc-icon"></div>
-                <div class="tool-btn doc-icon-btn" id="openSettingsBtn" title="全局设置"><img src="icons/settings.svg" alt="全局设置" class="doc-icon"></div>
+                <div class="tool-btn doc-icon-btn" id="refreshAllBtn" title="一键刷新全部组合的全部股票"><img src="icons/refresh.svg"
+                        alt="一键刷新" class="doc-icon"></div>
+                <div class="tool-btn doc-icon-btn" id="openKeyPointsBtn" title="要点管理"><img src="icons/keypoints.svg"
+                        alt="要点管理" class="doc-icon"></div>
+                <div class="tool-btn doc-icon-btn" id="openSettingsBtn" title="全局设置"><img src="icons/settings.svg"
+                        alt="全局设置" class="doc-icon"></div>
                 <div class="switch-group">
                     <button id="startBtn" class="tool-btn active">开始</button>
                     <button id="stopBtn" class="tool-btn" disabled>停止</button>
@@ -86,8 +90,10 @@
                 <span id="comboLabel" class="combo-label">持仓组合</span>
                 <div class="pagination-area">
                     <div class="io-buttons">
-                        <button id="exportBtn" class="io-icon-btn" title="导出全部数据"><img src="icons/export.svg" alt="导出"></button>
-                        <button id="importBtn" class="io-icon-btn" title="导入全部数据"><img src="icons/import.svg" alt="导入"></button>
+                        <button id="exportBtn" class="io-icon-btn" title="导出全部数据"><img src="icons/export.svg"
+                                alt="导出"></button>
+                        <button id="importBtn" class="io-icon-btn" title="导入全部数据"><img src="icons/import.svg"
+                                alt="导入"></button>
                         <input type="file" id="importFileInput" accept=".json,application/json" style="display:none">
                     </div>
                     <div id="paginationBar" class="pagination-bar"></div>
@@ -136,8 +142,10 @@
                         <select id="eventFilterSelect" class="event-filter-select">
                             <option value="">全部要点</option>
                         </select>
-                        <button type="button" id="clearEventFilterBtn" class="clear-event-filter-btn" title="清除筛选">×</button>
+                        <button type="button" id="clearEventFilterBtn" class="clear-event-filter-btn"
+                            title="清除筛选">×</button>
                     </div>
+                    <span id="eventAccuracy" class="event-accuracy" title="准确率 = 已归档且准确的 / 已归档"></span>
                 </div>
                 <div class="events-list" id="eventsList">
                     <!-- 事件列表动态渲染 -->
@@ -151,44 +159,58 @@
         <div class="settings-model">
             <div class="close-btn" id="closeSettingsBtn" title="关闭">×</div>
             <h4>全局设置</h4>
-            <div class="settings-item">
-                <label class="settings-toggle">
-                    <input type="checkbox" id="autoResizeWindowToggle">
-                    <span class="toggle-label">切换组合时，浏览器窗口自动伸缩</span>
-                </label>
-                <p class="settings-desc">开启后，切换组合时插件弹窗将根据股票数量自动调整高度</p>
-            </div>
-            <div class="settings-item">
-                <label class="settings-toggle" for="defaultPortfolioSelect">
-                    <span class="toggle-label">打开插件时默认显示组合</span>
-                </label>
-                <select id="defaultPortfolioSelect" class="settings-select"></select>
-                <p class="settings-desc">选择后，每次打开弹窗将自动切换到该组合，默认「持仓」</p>
-            </div>
-            <div class="settings-item">
-                <label class="settings-toggle">
-                    <input type="checkbox" id="hideKeyPointsToggle">
-                    <span class="toggle-label">隐藏首页「要点管理」图标</span>
-                </label>
-                <p class="settings-desc">开启后，首页工具栏将不再显示要点管理入口</p>
-            </div>
+            <!-- 顶部：数据获取方式 -->
             <div class="settings-item">
                 <label class="settings-toggle" for="dataSourceSelect">
                     <span class="toggle-label">数据获取方式</span>
                 </label>
                 <select id="dataSourceSelect" class="settings-select">
+                    <option value="adata">调用 API 直取（新浪/腾讯）</option>
+                    <option value="xiaoshi">调用 API 直取（小石大数据）</option>
                     <option value="refresh">刷新页面获取</option>
-                    <option value="api">调用 API 直取（开发中）</option>
                 </select>
-                <p class="settings-desc">默认「刷新页面获取」：到点刷新股票页面，抓取数据后写入；
-                    「调用 API 直取」为预留配置，功能开发中，暂不生效</p>
             </div>
+            <!-- API Key：紧跟数据获取方式，缩进显示（仅选「小石大数据」时可见，新浪/腾讯公开接口无需 Key） -->
+            <div class="settings-item api-key-group" id="apiKeyGroup" style="display:none">
+                <label class="settings-toggle" for="apiKeyInput">
+                    <span class="toggle-label">API Key（小石大数据）</span>
+                </label>
+                <div class="settings-input-row">
+                    <input type="text" id="apiKeyInput" class="settings-input" placeholder="填写批量行情接口的 API Key">
+                    <a class="api-key-link" href="https://www.shizixi.com/" target="_blank" rel="noopener"
+                        title="去小石大数据获取 API Key">↗</a>
+                </div>
+            </div>
+            <!-- 定时全量刷新 -->
             <div class="settings-item">
                 <span class="toggle-label">定时全量刷新（cron，最多 3 个）</span>
                 <div id="cronJobList" class="cron-job-list"></div>
                 <button type="button" id="addCronJobBtn" class="settings-btn">+ 添加定时任务</button>
                 <p class="settings-desc">格式：分 时 日 月 周（如 <code>0 9 * * 1-5</code> 表示工作日 9:00）；
                     日/周同时指定时需同时满足；到点自动刷新全部组合股票</p>
+            </div>
+            <!-- 默认组合 -->
+            <div class="settings-item">
+                <label class="settings-toggle" for="defaultPortfolioSelect">
+                    <span class="toggle-label">默认展示组合</span>
+                </label>
+                <select id="defaultPortfolioSelect" class="settings-select"></select>
+                <p class="settings-desc">选择后，每次打开弹窗将自动切换到该组合</p>
+            </div>
+            <!-- 所有勾选项放最下面 -->
+            <div class="settings-item">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="showKeyPointsToggle" checked>
+                    <span class="toggle-label">显示首页「要点管理」图标</span>
+                </label>
+                <p class="settings-desc">取消勾选后，首页工具栏将不再显示要点管理入口</p>
+            </div>
+            <div class="settings-item">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="autoResizeWindowToggle">
+                    <span class="toggle-label">切换组合时，浏览器窗口自动伸缩</span>
+                </label>
+                <p class="settings-desc">开启后，切换组合时插件弹窗将根据股票数量自动调整高度</p>
             </div>
         </div>
     </div>

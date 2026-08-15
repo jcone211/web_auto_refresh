@@ -131,7 +131,10 @@ body {
   font-size: 13px;
   line-height: 22px;
   cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .switch-group button:not(:disabled):not(.active):hover {
@@ -197,7 +200,9 @@ textarea {
   border: 1px solid #dfe3e7;
   border-radius: 4px;
   background: #fff;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 input:not([type="button"]):not([type="checkbox"]):focus,
@@ -349,7 +354,9 @@ button:disabled {
   font-size: 16px;
   line-height: 1;
   color: #999;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .close-btn:hover {
@@ -498,7 +505,9 @@ button:disabled {
   background: #fff;
   border-radius: 4px;
   overflow: hidden;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
+  box-shadow:
+    0 1px 2px 0 rgba(0, 0, 0, 0.3),
+    0 2px 6px 2px rgba(0, 0, 0, 0.15);
 }
 
 /* 表格样式 */
@@ -939,7 +948,7 @@ button:disabled {
 }
 
 .detail-section h5::before {
-  content: '';
+  content: "";
   width: 3px;
   height: 12px;
   background: #4caf50;
@@ -1007,7 +1016,9 @@ button:disabled {
   line-height: 20px;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .alert-dim-switch button.active {
@@ -1354,7 +1365,10 @@ button:disabled {
   border: 1px solid #e6ebee;
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(35, 55, 70, 0.06);
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s,
+    transform 0.2s;
 }
 
 .event-item:hover {
@@ -1430,7 +1444,9 @@ button:disabled {
   border-radius: 3px;
   line-height: 1;
   cursor: pointer;
-  transition: transform 0.2s, border-color 0.2s;
+  transition:
+    transform 0.2s,
+    border-color 0.2s;
 }
 
 .event-icon-btn svg {
@@ -1478,6 +1494,17 @@ button:disabled {
   font-size: 11px;
 }
 
+/* 归档后按状态区分：准确=浅绿，误判=灰（覆盖上面统一的灰色） */
+.event-status.accurate.archived {
+  background: #d4edda;
+  color: #155724;
+}
+
+.event-status.wrong.archived {
+  background: #e9ecef;
+  color: #6c757d;
+}
+
 .event-status-select {
   width: 50%;
   min-width: 76px;
@@ -1522,6 +1549,19 @@ button:disabled {
   height: 30px;
   padding: 0 8px;
   color: #475462;
+  background: #fff;
+  border: 1px solid #dce3e7;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* 筛选行右侧的准确率 */
+.event-accuracy {
+  white-space: nowrap;
+  height: 30px;
+  line-height: 30px;
+  padding: 0 10px;
+  color: #155724;
   background: #fff;
   border: 1px solid #dce3e7;
   border-radius: 6px;
@@ -1584,6 +1624,10 @@ button:disabled {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 420px;
+  max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto; /* 内容超长时可滚动 */
+  box-sizing: border-box;
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -1652,6 +1696,69 @@ button:disabled {
   font-size: 13px;
   background: #fff;
   cursor: pointer;
+}
+
+/* 全局设置里的文本输入框（API Key） */
+.settings-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  margin-top: 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.settings-input:focus {
+  border-color: #2196f3;
+  outline: none;
+}
+
+/* API Key 组：作为「数据获取方式」的子项，缩进显示、标题字号缩小 */
+.api-key-group {
+  margin-left: 24px;
+}
+
+.api-key-group .toggle-label {
+  font-size: 11px;
+  color: #555;
+}
+
+/* API Key 输入行：输入框 + 外部跳转图标 */
+.settings-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.settings-input-row .settings-input {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.api-key-link {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  color: #2196f3;
+  text-decoration: none;
+  border: 1px solid #dce3e7;
+  border-radius: 4px;
+  background: #fff;
+  transition: background 0.2s;
+}
+
+.api-key-link:hover {
+  background: #e3f2fd;
 }
 
 /* 全局设置里的按钮（添加定时任务） */
