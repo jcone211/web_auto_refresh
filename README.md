@@ -85,8 +85,11 @@ web_auto_refresh/
 
 **截图**：
 
+thswc 主页 - 股票列表（分页 + 组合切换）
 ![thswc 主页 - 股票列表（分页 + 组合切换）](images/README/thswc-home.png)
 
+股票详情 / 编辑页 - 阈值设置
 ![股票详情 / 编辑页 - 阈值设置](images/README/thswc-edit.png)
 
+达到阈值后的浏览器系统通知
 ![达到阈值后的浏览器系统通知](images/README/thswc-notify.png)

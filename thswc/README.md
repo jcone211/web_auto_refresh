@@ -106,12 +106,16 @@
 
 ## 界面预览
 
+主界面 - 股票列表（组合切换 + 分页）
 ![主界面 - 股票列表（组合切换 + 分页）](../images/README/thswc-home.png)
 
+全局设置
 ![全局设置](../images/README/thswc-settings.png)
 
+一键导入组合选择
 ![一键导入组合选择](../images/README/thswc-quick-import.png)
 
+要点与事件管理
 ![要点与事件管理](../images/README/thswc-events.png)
 
 ### 主界面
