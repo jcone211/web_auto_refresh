@@ -10,7 +10,9 @@
 <body>
     <div class="quick-open">
         <span>快速打开</span>
-        <textarea id="quickOpen" rows="2" placeholder="输入股票名称，Enter打开全部网页(任意字符分隔)"></textarea>
+        <textarea id="quickOpen" rows="2" placeholder="输入股票名称，Enter键打开网页(任意字符分隔)"></textarea>
+        <button type="button" id="quickImportBtn" class="quick-import-btn" style="display:none"
+            title="将输入内容按快速打开逻辑建组导入">一键导入</button>
         <div>
             <div>上次更新时间</div>
             <div id="lastUpdateTime" class="last-update-time">-</div>
@@ -35,7 +37,7 @@
         <div class="container toolbar">
             <div class="view-header">
                 <h3 id="viewTitle">股票列表</h3>
-                <div class="switch-group">
+                <div class="switch-group" id="viewSwitchGroup">
                     <button id="viewListBtn" class="tool-btn active">股票</button>
                     <button id="viewTrashBtn" class="tool-btn">垃圾池</button>
                 </div>
@@ -200,10 +202,31 @@
             <!-- 所有勾选项放最下面 -->
             <div class="settings-item">
                 <label class="settings-toggle">
+                    <input type="checkbox" id="refreshOnOpenToggle" checked>
+                    <span class="toggle-label">打开插件时全部更新</span>
+                </label>
+                <p class="settings-desc">打开插件时自动刷新全部股票数据</p>
+            </div>
+            <div class="settings-item">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="enableQuickImportToggle" checked>
+                    <span class="toggle-label">启用快速打开一键导入</span>
+                </label>
+                <p class="settings-desc">快速打开输入框有内容时显示「一键导入」按钮，可将内容按「快速打开」逻辑建组导入</p>
+            </div>
+            <div class="settings-item">
+                <label class="settings-toggle">
                     <input type="checkbox" id="showKeyPointsToggle" checked>
-                    <span class="toggle-label">显示首页「要点管理」图标</span>
+                    <span class="toggle-label">启用要点管理功能</span>
                 </label>
                 <p class="settings-desc">取消勾选后，首页工具栏将不再显示要点管理入口</p>
+            </div>
+            <div class="settings-item">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="enableTrashToggle" checked>
+                    <span class="toggle-label">启用垃圾池功能</span>
+                </label>
+                <p class="settings-desc">关闭后隐藏「垃圾池」视图与「加入垃圾池」入口；已入垃圾池的股票暂不可见，重新开启后恢复</p>
             </div>
             <div class="settings-item">
                 <label class="settings-toggle">
@@ -212,6 +235,34 @@
                 </label>
                 <p class="settings-desc">开启后，切换组合时插件弹窗将根据股票数量自动调整高度</p>
             </div>
+            <div class="settings-item">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="quickImportInStockWindowToggle" checked>
+                    <span class="toggle-label">快速打开和一键导入功能，页面打开逻辑不同</span>
+                </label>
+                <p class="settings-desc">勾选时一键导入在最小化专属窗口打开、快速打开在普通页面打开；取消后统一在普通页面打开</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 一键导入组合选择弹窗 -->
+    <div class="overlay" id="quickImportComboOverlay" style="display:none">
+        <div class="settings-model">
+            <div class="close-btn" id="closeQuickImportComboBtn" title="关闭">×</div>
+            <h4>一键导入到组合</h4>
+            <div class="settings-item">
+                <label class="settings-toggle" for="quickImportComboSelect">
+                    <span class="toggle-label">选择已有组合</span>
+                </label>
+                <select id="quickImportComboSelect" class="settings-select"></select>
+            </div>
+            <div class="settings-item">
+                <label class="settings-toggle" for="quickImportComboInput">
+                    <span class="toggle-label">或输入新组合名（不超过4字）</span>
+                </label>
+                <input type="text" id="quickImportComboInput" class="settings-input" placeholder="留空则使用上方选择的组合">
+            </div>
+            <button type="button" id="confirmQuickImportComboBtn" class="settings-btn">确定导入</button>
         </div>
     </div>
 

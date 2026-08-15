@@ -271,6 +271,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // 一键/定时全量刷新：聚合全部组合的股票，立即触发（与监控运行状态无关）
         refreshAllStocks((count) => sendResponse({ status: 'ok', count }));
         return true; // 异步 sendResponse
+    } else if (request.action === 'refreshOne') {
+        // 单只股票立即刷新（新增股票保存后回填数据用）：直接打开/刷新该股票页面，
+        // 不等下一轮定时调度；同时放开抓取窗口，监控未运行时也允许本次回填
+        allowCapturedUntil = Date.now() + ALLOW_CAPTURE_WINDOW_MS;
+        refreshStockTab(request.url);
+        sendResponse({ status: 'ok' });
+    } else if (request.action === 'armCapture') {
+        // 快速打开/一键导入打开页面后：放开抓取窗口，监控未运行时也允许本次回填解析
+        // （这些页面由 chrome.tabs.create 打开，不设窗口则「未运行即丢弃」会拦掉抓取）
+        allowCapturedUntil = Date.now() + ALLOW_CAPTURE_WINDOW_MS;
+        sendResponse({ status: 'ok' });
     } else if (request.action === 'syncCronJobs') {
         // cron 配置变更（增删/启停/表达式修改）后重排全部一次性 alarm
         scheduleCronAlarms();

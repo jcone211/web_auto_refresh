@@ -179,6 +179,11 @@ body {
   height: 30px;
 }
 
+/* 选择器下拉框 */
+#selectorName {
+  width: 120px;
+}
+
 label {
   display: block;
   margin-bottom: 5px;
@@ -273,6 +278,29 @@ button:disabled {
 }
 
 .create-link:hover {
+  background: #4caf50;
+  color: #fff;
+}
+
+/* 快速打开「一键导入」按钮：与添加按钮同风格的绿边 pill */
+.quick-import-btn {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  margin-left: 8px;
+  border: 1px solid #4caf50;
+  border-radius: 3px;
+  background: none;
+  color: #4caf50;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  align-self: center;
+  box-sizing: border-box;
+}
+
+.quick-import-btn:hover {
   background: #4caf50;
   color: #fff;
 }
@@ -1357,6 +1385,7 @@ button:disabled {
 }
 
 .event-item {
+  position: relative; /* 要点标签绝对定位的参照 */
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -1381,6 +1410,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 标签已绝对定位到右上角，不再占文档流，时间与内容间距不受其影响 */
 }
 
 .event-time {
@@ -1391,15 +1421,20 @@ button:disabled {
 }
 
 .event-keypoint-tag {
-  max-width: 230px;
-  overflow: hidden;
+  /* 绝对定位于卡片右上角（对齐卡片 padding），不占文档流；
+     超过约 8 个汉字（1em ≈ 1 中文字宽）即换行显示 */
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 1;
+  max-width: 11em;
   padding: 3px 8px;
   color: #398b4c;
   background: #eaf7ed;
   border-radius: 5px;
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .event-content-list {

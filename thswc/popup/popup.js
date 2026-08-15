@@ -49,6 +49,10 @@ let eventFilterKeyPoint = ''; // 事件按要点筛选值，'' 表示全部
 let autoResizeWindow = false; // 切换组合时专属窗口自动伸缩
 let defaultPortfolio = '持仓'; // 打开插件时默认显示的组合，默认「持仓」
 let hideKeyPoints = false; // 隐藏首页「要点管理」图标
+let enableTrash = true; // 启用垃圾池功能（默认开启）
+let refreshOnOpen = true; // 打开插件时全部更新（默认开启，不弹窗）
+let enableQuickImport = true; // 启用快速打开一键导入（默认开启）
+let quickImportInStockWindow = true; // 一键导入在最小化专属窗口打开（默认开启）；关闭则统一普通页面打开
 let dataSource = 'refresh'; // 数据获取方式：'refresh' 刷新页面获取 | 'api' 调用 API 直取（未实现）
 let cronJobs = []; // 定时全量刷新：[{ id, expr, enabled }]，最多 3 个
 
@@ -70,6 +74,13 @@ const selectorsEnum = {
 
 // ---------------- DOM 引用 ----------------
 const quickOpenEl = document.getElementById('quickOpen');
+const quickImportBtnEl = document.getElementById('quickImportBtn');
+// 一键导入组合选择弹窗
+const quickImportComboOverlayEl = document.getElementById('quickImportComboOverlay');
+const closeQuickImportComboBtnEl = document.getElementById('closeQuickImportComboBtn');
+const quickImportComboSelectEl = document.getElementById('quickImportComboSelect');
+const quickImportComboInputEl = document.getElementById('quickImportComboInput');
+const confirmQuickImportComboBtnEl = document.getElementById('confirmQuickImportComboBtn');
 const lastUpdateTimeEl = document.getElementById('lastUpdateTime');
 const intervalInput = document.getElementById('interval');
 const startBtn = document.getElementById('startBtn');
@@ -112,6 +123,7 @@ const editActionsTopEl = document.getElementById('editActionsTop');
 const viewTitleEl = document.getElementById('viewTitle');
 const viewListBtnEl = document.getElementById('viewListBtn');
 const viewTrashBtnEl = document.getElementById('viewTrashBtn');
+const viewSwitchGroupEl = document.getElementById('viewSwitchGroup');
 const paginationBarEl = document.getElementById('paginationBar');
 const exportBtnEl = document.getElementById('exportBtn');
 const importBtnEl = document.getElementById('importBtn');
@@ -147,6 +159,10 @@ const closeSettingsBtnEl = document.getElementById('closeSettingsBtn');
 const autoResizeToggleEl = document.getElementById('autoResizeWindowToggle');
 const defaultPortfolioSelectEl = document.getElementById('defaultPortfolioSelect');
 const showKeyPointsToggleEl = document.getElementById('showKeyPointsToggle');
+const enableTrashToggleEl = document.getElementById('enableTrashToggle');
+const refreshOnOpenToggleEl = document.getElementById('refreshOnOpenToggle');
+const enableQuickImportToggleEl = document.getElementById('enableQuickImportToggle');
+const quickImportInStockWindowToggleEl = document.getElementById('quickImportInStockWindowToggle');
 const dataSourceSelectEl = document.getElementById('dataSourceSelect');
 const apiKeyInputEl = document.getElementById('apiKeyInput');
 const apiKeyGroupEl = document.getElementById('apiKeyGroup');
@@ -197,11 +213,27 @@ async function handleCaptured(message) {
         const messageUrl = message.documentData.url;
         dbg('收到抓取:', messageUrl);
         // 匹配双目标：存储 URL 与生效 URL（xq1 下为拼接的雪球链接，过渡期两种页面都会收到）；
-        // 页面加载后 iwencai 会追加 &sign=，比较前需剔除
+        // 页面加载后 iwencai 会追加 &sign=，比较前需剔除。
+        // 搜索词兜底：一键导入的搜索 URL（问财 w= / 雪球 q=）打开后可能跳转成详情页 URL，
+        // 精确匹配失效时按「消息 URL 的搜索参数与股票名称一致」匹配，
+        // 并把股票地址同步为实际页面 URL，后续刷新直接用详情页地址
         const strippedMsg = stripSign(messageUrl);
-        const index = stockList.findIndex(item =>
-            stripSign(item.url) === strippedMsg
-            || stripSign(effectiveStockUrl(item, selectorName)) === strippedMsg);
+        const msgWord = (() => {
+            try {
+                const u = new URL(messageUrl);
+                return u.searchParams.get('w') || u.searchParams.get('q') || '';
+            } catch { return ''; }
+        })();
+        const matchStock = (s, sn) => {
+            if (stripSign(s.url) === strippedMsg
+                || stripSign(effectiveStockUrl(s, sn)) === strippedMsg) return true;
+            if (msgWord && s.name === msgWord) {
+                s.url = strippedMsg; // 搜索页跳转后：地址同步为实际详情页 URL
+                return true;
+            }
+            return false;
+        };
+        const index = stockList.findIndex(item => matchStock(item, selectorName));
         // 当前组合未命中时，继续到其他组合查找（一键/cron 全量刷新会刷新全部组合，
         // 非活动组合的数据也要落库；命中多只同 URL 股票时一并更新）
         const others = [];
@@ -211,15 +243,12 @@ async function handleCaptured(message) {
                 const p = portfolios[name];
                 const sn = p.selectorName || 'wc1'; // 各组合独立的选择器
                 for (const s of p.stockList || []) {
-                    if (stripSign(s.url) === strippedMsg
-                        || stripSign(effectiveStockUrl(s, sn)) === strippedMsg) {
-                        others.push(s);
-                    }
+                    if (matchStock(s, sn)) others.push(s);
                 }
             }
         }
         if (index === -1 && others.length === 0) {
-            console.warn('[thswc:popup] URL 匹配失败!\n  来址(剔sign):', stripSign(messageUrl),
+            console.warn('[thswc:popup] URL 匹配失败!\n  来址(剔sign):', strippedMsg,
                 '\n  已存列表:', stockList.map(s => ({ 原始: s.url, 剔sign: stripSign(s.url) })));
             return;
         }
@@ -452,7 +481,7 @@ function deletePortfolio(name) {
     if (!portfolios[name]) return;
     if (DEFAULT_PORTFOLIOS.includes(name)) { alert(`默认组合「${name}」不可删除`); return; }
     if (name === activePortfolio) { alert('当前组合使用中，请先切换到其他组合再删除'); return; }
-    if (!confirm(`删除组合「${name}」？组合内的股票快照将一并删除`)) return;
+    if (!confirm(`删除组合「${name}」？组合内的股票将一并删除`)) return;
     delete portfolios[name];
     chrome.storage.local.set({ portfolios }, refreshCombos);
 }
@@ -572,7 +601,7 @@ function promptComboName(message, prefilled) {
 async function handleExport() {
     if (!confirm('将导出插件全部数据和配置（所有组合、要点、事件、设置等），确定继续？')) return;
     const localData = await storageGet(chrome.storage.local, ['stockList', 'portfolios', 'activePortfolio', 'currentView', 'keyPoints', 'events']);
-    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio', 'hideKeyPoints', 'dataSource', 'cronJobs']);
+    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio', 'hideKeyPoints', 'enableTrash', 'refreshOnOpen', 'enableQuickImport', 'quickImportInStockWindow', 'dataSource', 'cronJobs']);
     const payload = {
         version: 2,
         type: 'full-backup',
@@ -592,6 +621,10 @@ async function handleExport() {
             autoResizeWindow: syncData.autoResizeWindow,
             defaultPortfolio: syncData.defaultPortfolio,
             hideKeyPoints: syncData.hideKeyPoints,
+            enableTrash: syncData.enableTrash,
+            refreshOnOpen: syncData.refreshOnOpen,
+            enableQuickImport: syncData.enableQuickImport,
+            quickImportInStockWindow: syncData.quickImportInStockWindow,
             dataSource: syncData.dataSource,
             cronJobs: syncData.cronJobs || [],
         },
@@ -642,6 +675,10 @@ async function handleImport(file) {
         if (typeof data.sync.autoResizeWindow === 'boolean') syncSet.autoResizeWindow = data.sync.autoResizeWindow;
         if (typeof data.sync.defaultPortfolio === 'string') syncSet.defaultPortfolio = data.sync.defaultPortfolio;
         if (typeof data.sync.hideKeyPoints === 'boolean') syncSet.hideKeyPoints = data.sync.hideKeyPoints;
+        if (typeof data.sync.enableTrash === 'boolean') syncSet.enableTrash = data.sync.enableTrash;
+        if (typeof data.sync.refreshOnOpen === 'boolean') syncSet.refreshOnOpen = data.sync.refreshOnOpen;
+        if (typeof data.sync.enableQuickImport === 'boolean') syncSet.enableQuickImport = data.sync.enableQuickImport;
+        if (typeof data.sync.quickImportInStockWindow === 'boolean') syncSet.quickImportInStockWindow = data.sync.quickImportInStockWindow;
         if (['refresh', 'xiaoshi', 'adata'].includes(data.sync.dataSource)) syncSet.dataSource = data.sync.dataSource;
         if (Array.isArray(data.sync.cronJobs)) syncSet.cronJobs = data.sync.cronJobs;
         if (Object.keys(syncSet).length) {
@@ -710,11 +747,17 @@ async function initState() {
 
 // 首次初始化
 initState().then(() => {
-    // 加载全局设置（默认组合、自动伸缩开关），应用默认组合后再做首次渲染
-    chrome.storage.sync.get(['defaultPortfolio', 'autoResizeWindow', 'hideKeyPoints'], (result) => {
+    // 加载全局设置（默认组合、自动伸缩、垃圾池开关、打开刷新、一键导入），应用默认组合后再做首次渲染
+    chrome.storage.sync.get(['defaultPortfolio', 'autoResizeWindow', 'hideKeyPoints', 'enableTrash', 'refreshOnOpen', 'enableQuickImport', 'quickImportInStockWindow'], (result) => {
         autoResizeWindow = !!result.autoResizeWindow;
         hideKeyPoints = !!result.hideKeyPoints;
+        enableTrash = result.enableTrash !== false; // 默认开启
+        refreshOnOpen = result.refreshOnOpen !== false; // 默认开启
+        enableQuickImport = result.enableQuickImport !== false; // 默认开启
+        quickImportInStockWindow = result.quickImportInStockWindow !== false; // 默认开启
         applyKeyPointsVisibility();
+        applyTrashVisibility();
+        updateQuickImportVisibility();
         const dp = result.defaultPortfolio || '持仓';
         // 存储的默认组合若已被删除，回退到固定默认「持仓」
         defaultPortfolio = portfolios[dp] ? dp : '持仓';
@@ -735,25 +778,152 @@ initState().then(() => {
         // 组合标签行渲染后补一次 resize，修正初始高度差值（不受设置开关限制）
         const count = stockList.filter(s => currentView === 'trash' ? s.inTrash : !s.inTrash).length;
         chrome.runtime.sendMessage({ action: 'resizePopupWindow', rows: Math.min(count, pageSize) });
+        // 「打开插件时全部更新」：打开即全量刷新股票数据（不弹窗提示，数据落地后仅更新首页「上次更新时间」）
+        if (refreshOnOpen) {
+            chrome.runtime.sendMessage({ action: 'refreshAll' });
+        }
     });
 });
+
+// 按快速打开逻辑拆分输入内容（空格、中英文逗号、顿号、分号、竖线、斜杠、星号，
+// 忽略纯 - 分隔线；星号通常跟在名称后，一并剔除）
+function splitQuickOpenInput() {
+    return quickOpenEl.value.split(/[\s,，、；;|\/*]+/).filter(item => item && !/^-+$/.test(item));
+}
+
+// 按快速打开逻辑构造单个搜索项的跳转地址：
+// ETF（159/51/58）问财不支持，直接开雪球个股页；其余跟随选择器（xq1 雪球搜索，否则问财搜索）
+function buildQuickOpenUrl(item) {
+    const etfPrefix = etfPrefixForCode(item);
+    if (etfPrefix) {
+        return `https://xueqiu.com/S/${etfPrefix}${item}`;
+    }
+    return selectorName === 'xq1'
+        ? `https://xueqiu.com/k?q=${encodeURIComponent(item)}`
+        : `https://www.iwencai.com/screener/result?w=${encodeURIComponent(item)}&querytype=stock`;
+}
 
 quickOpenEl.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && quickOpenEl.value) {
         event.preventDefault();
-        const names = quickOpenEl.value.split(/[\s,，、；;|\/]+/).filter(item => item && !/^-+$/.test(item));
-        names.forEach((item) => {
-            // ETF 代码（159/51/58）问财不支持，直接开雪球个股页
-            const etfPrefix = etfPrefixForCode(item);
-            const url = etfPrefix
-                ? `https://xueqiu.com/S/${etfPrefix}${item}`
-                : selectorName === 'xq1'
-                    ? `https://xueqiu.com/k?q=${encodeURIComponent(item)}`
-                    : `https://www.iwencai.com/screener/result?w=${encodeURIComponent(item)}&querytype=stock`;
-            chrome.tabs.create({ url });
+        // 放开抓取窗口：监控未运行时，打开的页面抓取也能回填解析
+        chrome.runtime.sendMessage({ action: 'armCapture' });
+        splitQuickOpenInput().forEach((item) => {
+            chrome.tabs.create({ url: buildQuickOpenUrl(item) });
         });
     }
 });
+
+// 一键导入：按快速打开逻辑把输入内容建组导入——
+// 弹窗选择已有组合（含默认组合）或输入新组合名；按名称去重，组合内同名跳过
+function handleQuickImport() {
+    const items = splitQuickOpenInput();
+    if (items.length === 0) return;
+    openQuickImportComboModal(items);
+}
+
+let pendingImportItems = []; // 组合选择弹窗确认时待导入的输入项
+
+// 打开一键导入的组合选择弹窗（下拉已有组合 + 输入新建）
+function openQuickImportComboModal(items) {
+    pendingImportItems = items;
+    quickImportComboSelectEl.innerHTML = '';
+    Object.keys(portfolios).forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        quickImportComboSelectEl.appendChild(opt);
+    });
+    // 默认选中当前活动组合（或第一个）
+    quickImportComboSelectEl.value = Object.keys(portfolios).includes(activePortfolio)
+        ? activePortfolio
+        : (Object.keys(portfolios)[0] || '');
+    quickImportComboInputEl.value = '';
+    quickImportComboOverlayEl.style.display = 'flex';
+}
+
+function closeQuickImportComboModal() {
+    quickImportComboOverlayEl.style.display = 'none';
+    pendingImportItems = [];
+}
+
+// 执行导入：写入目标组合（不存在则新建），按名称去重，随后逐个打开页面
+function executeQuickImport(items, name) {
+    if (!portfolios[name]) {
+        portfolios[name] = { stockList: [], selectorName };
+    }
+    const target = portfolios[name].stockList;
+    const now = Date.now();
+    let added = 0;
+    let skipped = 0;
+    items.forEach(item => {
+        const url = normalizeUrl(buildQuickOpenUrl(item)); // 问财/雪球搜索页地址作为股票标识
+        if (!url) return;
+        if (target.some(s => s.name === item)) { skipped++; return; } // 组合内同名跳过
+        target.push({
+            url, name: item, code: '', prefix: '', // 名称先取输入词，抓取后回填
+            startPrice: null, currentPrice: null, percent: null,
+            importPrice: null,
+            targetPercentLe: '', targetPercentGe: '',
+            importTargetPercentLe: '', importTargetPercentGe: '',
+            stopRunning: false, notifiedDaily: false, notifiedImport: false,
+            inTrash: false, pinned: false, pinOrder: null, createdAt: now,
+        });
+        added++;
+    });
+    if (added === 0) { alert(`组合「${name}」中已存在全部输入项（按名称匹配），已跳过`); return; }
+    chrome.storage.local.set({ portfolios }, () => {
+        switchPortfolio(name); // 切到导入的组合，便于查看
+        // 页面打开方式：默认在最小化专属窗口（refreshOne 自带抓取放开窗口）；
+        // 关闭「页面打开逻辑不同」后统一在普通 Chrome 页面打开（需放开抓取窗口）
+        const openUrl = (item) => {
+            const url = buildQuickOpenUrl(item);
+            if (quickImportInStockWindow) {
+                chrome.runtime.sendMessage({ action: 'refreshOne', url });
+            } else {
+                chrome.runtime.sendMessage({ action: 'armCapture' });
+                chrome.tabs.create({ url });
+            }
+        };
+        // 逐个延迟打开，避免一次性打开过多页面（1.5-2.2s 随机间隔）
+        let delay = 0;
+        items.forEach(item => {
+            delay += 1500 + Math.random() * 700;
+            setTimeout(() => openUrl(item), delay);
+        });
+        quickOpenEl.value = '';
+        updateQuickImportVisibility();
+        alert(`已导入 ${added} 支股票到组合「${name}」${skipped > 0 ? `，跳过 ${skipped} 支重复` : ''}，页面将逐个打开`);
+    });
+}
+
+// 组合选择弹窗事件：确认时输入优先（新建或匹配现有），否则用下拉选中
+confirmQuickImportComboBtnEl.addEventListener('click', () => {
+    const items = pendingImportItems;
+    if (!items || items.length === 0) return;
+    const inputName = quickImportComboInputEl.value.trim();
+    let name;
+    if (inputName) {
+        if (!validComboName(inputName)) { alert('组合命名必须为1-4个字'); return; }
+        name = inputName; // 与现有组合重名时自然导入到现有组合
+    } else {
+        name = quickImportComboSelectEl.value;
+    }
+    if (!name) { alert('请选择或输入组合名称'); return; }
+    executeQuickImport(items, name);
+    closeQuickImportComboModal();
+});
+quickImportComboOverlayEl.addEventListener('click', (e) => {
+    if (e.target === quickImportComboOverlayEl) closeQuickImportComboModal();
+});
+closeQuickImportComboBtnEl.addEventListener('click', closeQuickImportComboModal);
+
+// 「一键导入」按钮显隐：开关启用且输入框有内容时显示
+function updateQuickImportVisibility() {
+    quickImportBtnEl.style.display = (enableQuickImport && quickOpenEl.value.trim()) ? '' : 'none';
+}
+quickOpenEl.addEventListener('input', updateQuickImportVisibility);
+quickImportBtnEl.addEventListener('click', handleQuickImport);
 
 // 选择器变更：持久化并镜像到活动组合，立即按新生效地址重排刷新（名称跳转也随之更新）
 selectorEl.addEventListener('change', () => {
@@ -809,6 +979,7 @@ saveStockBtnEl.addEventListener('click', () => {
     const tGe = targetPercentGeEl.value;
     const iLe = importTargetPercentLeEl.value;
     const iGe = importTargetPercentGeEl.value;
+    let addedUrl = null;
     if (editUrl) {
         const item = stockList.find(s => s.url === editUrl);
         if (!item) { alert('保存失败，请关闭重试'); return; }
@@ -834,9 +1005,14 @@ saveStockBtnEl.addEventListener('click', () => {
             stopRunning: false, notifiedDaily: false, notifiedImport: false,
             inTrash: false, pinned: false, pinOrder: null, createdAt: Date.now(),
         });
+        addedUrl = url;
     }
     saveAndRender();
     closeModal();
+    // 新增股票：保存后立即访问一次网址回填数据（名称/代码/现价等），不等下一轮定时
+    if (addedUrl) {
+        chrome.runtime.sendMessage({ action: 'refreshOne', url: addedUrl });
+    }
 });
 
 delStockBtnEl.addEventListener('click', () => {
@@ -968,6 +1144,10 @@ function closeKeyPoints() {
 function openSettings() {
     autoResizeToggleEl.checked = autoResizeWindow;
     showKeyPointsToggleEl.checked = !hideKeyPoints;
+    enableTrashToggleEl.checked = enableTrash;
+    refreshOnOpenToggleEl.checked = refreshOnOpen;
+    enableQuickImportToggleEl.checked = enableQuickImport;
+    quickImportInStockWindowToggleEl.checked = quickImportInStockWindow;
     // 填充默认组合下拉框（始终有活动组合可选）
     defaultPortfolioSelectEl.innerHTML = '';
     Object.keys(portfolios).forEach(name => {
@@ -1058,6 +1238,16 @@ function saveCronJobs() {
 // 按「隐藏要点管理」开关控制首页要点管理图标的显隐
 function applyKeyPointsVisibility() {
     openKeyPointsBtnEl.style.display = hideKeyPoints ? 'none' : '';
+}
+
+// 按「启用垃圾池」开关控制垃圾池入口：隐藏整个「股票/垃圾池」切换组与
+// 编辑弹窗「加入垃圾池」按钮；关闭时若当前处于垃圾池视图则切回股票列表
+function applyTrashVisibility() {
+    viewSwitchGroupEl.style.display = enableTrash ? '' : 'none';
+    trashToggleBtnEl.style.display = enableTrash ? '' : 'none';
+    if (!enableTrash && currentView === 'trash') {
+        switchView('list');
+    }
 }
 
 function closeSettings() {
@@ -1152,6 +1342,32 @@ showKeyPointsToggleEl.addEventListener('change', () => {
     hideKeyPoints = !showKeyPointsToggleEl.checked;
     chrome.storage.sync.set({ hideKeyPoints });
     applyKeyPointsVisibility();
+});
+
+// 「启用垃圾池」默认勾选；取消后隐藏垃圾池入口
+enableTrashToggleEl.addEventListener('change', () => {
+    enableTrash = enableTrashToggleEl.checked;
+    chrome.storage.sync.set({ enableTrash });
+    applyTrashVisibility();
+});
+
+// 「打开插件时全部更新」默认勾选；取消后打开插件不再自动全量刷新
+refreshOnOpenToggleEl.addEventListener('change', () => {
+    refreshOnOpen = refreshOnOpenToggleEl.checked;
+    chrome.storage.sync.set({ refreshOnOpen });
+});
+
+// 「启用快速打开一键导入」默认勾选；取消后不再显示一键导入按钮
+enableQuickImportToggleEl.addEventListener('change', () => {
+    enableQuickImport = enableQuickImportToggleEl.checked;
+    chrome.storage.sync.set({ enableQuickImport });
+    updateQuickImportVisibility();
+});
+
+// 「页面打开逻辑不同」默认勾选：一键导入走最小化专属窗口；关闭后统一普通页面打开
+quickImportInStockWindowToggleEl.addEventListener('change', () => {
+    quickImportInStockWindow = quickImportInStockWindowToggleEl.checked;
+    chrome.storage.sync.set({ quickImportInStockWindow });
 });
 
 // 数据获取方式：refresh 页面刷新 / api 批量行情接口
