@@ -203,6 +203,13 @@ export async function readFile(rootHandle, relPath, maxChars = 20000) {
     return { path: relPath, content: text.slice(0, maxChars), truncated, size: file.size };
 }
 
+// 读取二进制文件（供 parquet 等二进制解析器使用）
+export async function readFileBinary(rootHandle, relPath) {
+    const fileHandle = await resolveFile(rootHandle, relPath);
+    const file = await fileHandle.getFile();
+    return { path: relPath, buffer: await file.arrayBuffer(), size: file.size };
+}
+
 // 覆盖写文本文件
 export async function writeFile(rootHandle, relPath, content) {
     const fileHandle = await resolveFile(rootHandle, relPath, true);

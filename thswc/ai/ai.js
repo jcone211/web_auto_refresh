@@ -8,8 +8,12 @@ import { getDateTime } from '../shared/utils.js';
 import {
     getWorkspaceHandles, pickPrimaryWorkspace, addWorkspaceDir, removeWorkspaceDir,
     workspacePermission, reauthorizeWorkspace, readyRoot,
-    listDir, readFile, writeFile, appendFile, writeUpload
+    listDir, readFile, readFileBinary, writeFile, appendFile, writeUpload
 } from './fsa.js';
+import { parquetMetadataAsync, parquetSchema, parquetReadObjects, toJson } from './vendor/hyparquet/index.js';
+import { compressors } from './vendor/hyparquet/compressors.js';
+import { xiaoshiSearchStock, xiaoshiDailyKline, xiaoshiQuote } from './xiaoshi_stock_kline.js';
+import { getMarketDaily as adataGetMarketDaily, getMarketEtfDaily as adataGetMarketEtfDaily } from './adata_stock_kline.js';
 
 // 诊断日志开关：置 false 可停止逐次请求刷屏（warn/error 始终保留）
 const DEBUG = true;
@@ -52,6 +56,8 @@ const stopBtn = document.getElementById('stopBtn');
 const uploadBtn = document.getElementById('uploadBtn');
 const uploadInput = document.getElementById('uploadInput');
 const pastePreviews = document.getElementById('pastePreviews');
+const intentBubblesEl = document.getElementById('intentBubbles');
+const intentBubbleEls = document.querySelectorAll('.intent-bubble');
 const sessionSelect = document.getElementById('sessionSelect');
 const newSessionBtn = document.getElementById('newSessionBtn');
 const renameSessionBtn = document.getElementById('renameSessionBtn');
@@ -86,14 +92,24 @@ const TOOL_DEFS = [
     { type: 'function', function: { name: 'switch_portfolio', description: '切换当前活动组合（影响插件弹窗显示与定时监控范围），先校验组合是否存在', parameters: { type: 'object', properties: { name: { type: 'string', description: '目标组合名' } }, required: ['name'] } } },
     { type: 'function', function: { name: 'get_key_points', description: '读取交易要点列表（要点内容与权重）', parameters: { type: 'object', properties: {}, required: [] } } },
     { type: 'function', function: { name: 'get_events', description: '读取事件记录列表（关联要点/内容/日期/状态）', parameters: { type: 'object', properties: {}, required: [] } } },
+    { type: 'function', function: { name: 'create_key_point', description: '创建一条交易要点（内容 + 权重 1-99）', parameters: { type: 'object', properties: { text: { type: 'string', description: '要点内容' }, weight: { type: 'number', description: '权重 1-99' } }, required: ['text', 'weight'] } } },
+    { type: 'function', function: { name: 'update_key_point', description: '修改要点（按原文定位；改动内容不影响已关联该要点的历史事件）', parameters: { type: 'object', properties: { old_text: { type: 'string', description: '要修改的要点原文' }, text: { type: 'string', description: '新的要点内容' }, weight: { type: 'number', description: '新的权重 1-99' } }, required: ['old_text', 'text', 'weight'] } } },
+    { type: 'function', function: { name: 'delete_key_point', description: '删除一条要点（不删除其关联事件）', parameters: { type: 'object', properties: { text: { type: 'string', description: '要删除的要点内容' } }, required: ['text'] } } },
+    { type: 'function', function: { name: 'create_event', description: '创建一条预测事件（关联要点可留空；time 为 YYYY-MM-DD，缺省今天）。若存在超过一周仍未归档的事件会一并提醒用户补充', parameters: { type: 'object', properties: { key_point_text: { type: 'string', description: '关联要点内容，可为空' }, content: { type: 'string', description: '事件内容' }, time: { type: 'string', description: '事件日期 YYYY-MM-DD' } }, required: ['content'] } } },
+    { type: 'function', function: { name: 'update_event', description: '修改事件（按 id；已归档事件不可修改），支持改关联要点/内容/日期/状态', parameters: { type: 'object', properties: { id: { type: 'string', description: '事件 id（用 get_events 查询）' }, key_point_text: { type: 'string', description: '新的关联要点' }, content: { type: 'string', description: '新的事件内容' }, time: { type: 'string', description: '新的事件日期 YYYY-MM-DD' }, status: { type: 'string', description: '新状态：pending 待预测 / accurate 准确 / wrong 误判' } }, required: ['id'] } } },
+    { type: 'function', function: { name: 'delete_event', description: '删除一条事件（按 id）', parameters: { type: 'object', properties: { id: { type: 'string', description: '事件 id（用 get_events 查询）' } }, required: ['id'] } } },
+    { type: 'function', function: { name: 'add_stock_to_portfolio', description: '按名称向指定组合添加一只股票（组合缺省「持仓」）。自动生成问财搜索页作为监控地址，ETF（159/51/58 开头）走雪球个股页', parameters: { type: 'object', properties: { name: { type: 'string', description: '股票名称' }, portfolio: { type: 'string', description: '目标组合名，缺省「持仓」' } }, required: ['name'] } } },
+    { type: 'function', function: { name: 'move_stock_to_combo', description: '把股票从来源组合移动到目标组合（按名称匹配、忽略首尾空格；来源缺省当前活动组合，目标缺省「观察」）。用于记录「卖出」等调仓：卖出时应传 source_portfolio 为实际持有该股的组合（通常「持仓」）；若目标组合已存在同名股票，则仅从来源组合删除、不重复添加', parameters: { type: 'object', properties: { name: { type: 'string', description: '股票名称' }, target_portfolio: { type: 'string', description: '目标组合名，缺省「观察」' }, source_portfolio: { type: 'string', description: '来源组合名（卖出的实际持仓组合），缺省当前活动组合' } }, required: ['name'] } } },
     { type: 'function', function: { name: 'get_current_view', description: '读取当前列表视图（股票列表或垃圾池）', parameters: { type: 'object', properties: {}, required: [] } } },
     { type: 'function', function: { name: 'get_settings', description: '读取扩展全局设置（刷新间隔/选择器/分页/cron 定时任务，不含任何密钥）', parameters: { type: 'object', properties: {}, required: [] } } },
     { type: 'function', function: { name: 'save_memory', description: '保存一条长期记忆（用户偏好/习惯等），之后每轮对话都会注入；同时镜像到主工作目录 memory.md', parameters: { type: 'object', properties: { content: { type: 'string', description: '要记住的内容' } }, required: ['content'] } } },
     { type: 'function', function: { name: 'refresh_all', description: '触发扩展全量刷新全部组合股票（按全局设置的数据获取方式执行）', parameters: { type: 'object', properties: {}, required: [] } } },
     { type: 'function', function: { name: 'list_workspaces', description: '列出已授权的全部工作目录（主目录与附加目录）及其权限状态', parameters: { type: 'object', properties: {}, required: [] } } },
     { type: 'function', function: { name: 'list_dir', description: '列出工作目录（或子目录）内容。root 缺省为主目录，可传附加目录名；软链接条目无法访问（浏览器安全限制）', parameters: { type: 'object', properties: { path: { type: 'string', description: '相对所选目录的路径，空为根目录' }, root: { type: 'string', description: '工作目录名，可用 list_workspaces 查询；缺省为主目录' } }, required: [] } } },
-    { type: 'function', function: { name: 'read_file', description: '读取工作目录中的文本文件（默认截断 20000 字符）', parameters: { type: 'object', properties: { path: { type: 'string', description: '相对所选目录的文件路径' }, root: { type: 'string', description: '工作目录名，缺省为主目录' } }, required: ['path'] } } },
-    { type: 'function', function: { name: 'write_file', description: '覆盖写工作目录中的文本文件（不存在则创建，含中间目录）', parameters: { type: 'object', properties: { path: { type: 'string', description: '相对所选目录的文件路径' }, content: { type: 'string', description: '文件内容' }, root: { type: 'string', description: '工作目录名，缺省为主目录' } }, required: ['path', 'content'] } } },
+    { type: 'function', function: { name: 'read_parquet', description: '读取工作目录中的 Parquet 数据文件，返回列名、总行数和限定数量的行。适合查询股票日线等 parquet 数据；path 必须是相对授权工作目录的路径，root 缺省为主目录。默认最多返回 100 行，可用 columns 选择列。', parameters: { type: 'object', properties: { path: { type: 'string', description: '相对工作目录的 .parquet 文件路径' }, root: { type: 'string', description: '工作目录名，缺省为主目录' }, columns: { type: 'array', items: { type: 'string' }, description: '要读取的列名；缺省读取全部列' }, row_start: { type: 'integer', minimum: 0, description: '起始行，缺省 0' }, limit: { type: 'integer', minimum: 1, maximum: 500, description: '最多返回行数，缺省 100，最大 500' } }, required: ['path'] } } },
+    { type: 'function', function: { name: 'read_stock_kline', description: '获取股票近 N 天日线 K 线（开/高/低/收/成交量/成交额/涨跌幅）。优先读取工作目录 parquet 缓存（data/a_share_daily/qfq/data_*.parquet，小石量化数据）；当缓存缺少最近交易日数据时自动调用小石量化 API 补齐。支持按股票名称或代码。', parameters: { type: 'object', properties: { name: { type: 'string', description: '股票名称，如「德明利」；与 code 二选一' }, code: { type: 'string', description: '股票代码，如 001309 或 001309.SZ；与 name 二选一' }, days: { type: 'integer', minimum: 1, maximum: 60, description: '近 N 个交易日，缺省 7' }, root: { type: 'string', description: '工作目录名，缺省为主目录（parquet 数据目录的根，如含 data/a_share_daily 的目录）' } }, required: [] } } },
+    { type: 'function', function: { name: 'get_stock_quote', description: '获取股票实时行情（最新价/涨跌幅/开盘/最高/最低/成交量/成交额/换手率），不经页面直接调用小石实时行情接口。支持按股票名称或代码。', parameters: { type: 'object', properties: { name: { type: 'string', description: '股票名称，如「德明利」；与 code 二选一' }, code: { type: 'string', description: '股票代码，如 001309 或 001309.SZ；与 name 二选一' } }, required: [] } } },
+
     { type: 'function', function: { name: 'append_file', description: '向工作目录中的文本文件追加内容（不存在则创建）', parameters: { type: 'object', properties: { path: { type: 'string', description: '相对所选目录的文件路径' }, content: { type: 'string', description: '要追加的内容' }, root: { type: 'string', description: '工作目录名，缺省为主目录' } }, required: ['path', 'content'] } } },
 ];
 
@@ -155,18 +171,204 @@ const toolExecutors = {
         return { ok: true, activePortfolio: name, stockCount: stockList.length };
     },
     async get_key_points() {
+        const denied = await requireKeyPoints();
+        if (denied) return denied;
         const { keyPoints } = await storageGet(chrome.storage.local, 'keyPoints');
-        return (keyPoints || []).map(kp => ({ text: kp.text, weight: kp.weight }));
+        return summarizeList(keyPoints || [], kp => ({ text: kp.text, weight: kp.weight }));
     },
     async get_events() {
+        const denied = await requireKeyPoints();
+        if (denied) return denied;
         const { events } = await storageGet(chrome.storage.local, 'events');
-        return summarizeList(events || [], e => ({
+        const result = summarizeList(events || [], e => ({
+            id: e.id,
             keyPointText: e.keyPointText || '',
             content: e.content,
             time: e.time,
             status: e.status,
             archived: !!e.archived,
         }));
+        const remind = staleEventReminder(events);
+        if (remind) result.remind = remind;
+        return result;
+    },
+    async create_key_point(args) {
+        const denied = await requireKeyPoints();
+        if (denied) return denied;
+        const text = String(args.text || '').trim();
+        const weight = parseInt(args.weight, 10);
+        if (!text) return { error: '要点内容不能为空' };
+        if (!Number.isFinite(weight) || weight < 1 || weight > 99) return { error: '权重必须为 1-99 的数字' };
+        const { keyPoints } = await storageGet(chrome.storage.local, 'keyPoints');
+        const list = keyPoints || [];
+        if (list.some(k => k.text === text)) return { error: `要点「${text}」已存在` };
+        list.push({ text, weight });
+        await storageSet(chrome.storage.local, { keyPoints: list });
+        return { ok: true, text, weight, total: list.length };
+    },
+    async update_key_point(args) {
+        const denied = await requireKeyPoints();
+        if (denied) return denied;
+        const oldText = String(args.old_text || '').trim();
+        const text = String(args.text || '').trim();
+        const weight = parseInt(args.weight, 10);
+        if (!oldText || !text) return { error: 'old_text 与 text 不能为空' };
+        if (!Number.isFinite(weight) || weight < 1 || weight > 99) return { error: '权重必须为 1-99 的数字' };
+        const { keyPoints } = await storageGet(chrome.storage.local, 'keyPoints');
+        const list = keyPoints || [];
+        const idx = list.findIndex(k => k.text === oldText);
+        if (idx === -1) return { error: `要点「${oldText}」不存在` };
+        list[idx] = { text, weight };
+        await storageSet(chrome.storage.local, { keyPoints: list });
+        return { ok: true, text, weight };
+    },
+    async delete_key_point(args) {
+        const denied = await requireKeyPoints();
+        if (denied) return denied;
+        const text = String(args.text || '').trim();
+        if (!text) return { error: '要点内容不能为空' };
+        const { keyPoints } = await storageGet(chrome.storage.local, 'keyPoints');
+        const list = keyPoints || [];
+        if (!list.some(k => k.text === text)) return { error: `要点「${text}」不存在` };
+        await storageSet(chrome.storage.local, { keyPoints: list.filter(k => k.text !== text) });
+        return { ok: true, text };
+    },
+    async create_event(args) {
+        const denied = await requireKeyPoints();
+        if (denied) return denied;
+        const content = String(args.content || '').trim();
+        if (!content) return { error: '事件内容不能为空' };
+        const keyPointText = String(args.key_point_text || '').trim();
+        if (keyPointText) {
+            const { keyPoints } = await storageGet(chrome.storage.local, 'keyPoints');
+            if (!(keyPoints || []).some(k => k.text === keyPointText)) {
+                return { error: `关联要点「${keyPointText}」不存在，可先用 get_key_points 查看现有要点` };
+            }
+        }
+        let time = String(args.time || '').trim();
+        if (!time) time = todayStr();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(time)) return { error: 'time 需为 YYYY-MM-DD 格式' };
+        const { events } = await storageGet(chrome.storage.local, 'events');
+        const list = events || [];
+        const event = { id: genUid('ev'), keyPointText, content, time, status: 'pending', archived: false };
+        list.push(event);
+        await storageSet(chrome.storage.local, { events: list });
+        const result = { ok: true, event, total: list.length };
+        const remind = staleEventReminder(list);
+        if (remind) result.remind = remind;
+        return result;
+    },
+    async update_event(args) {
+        const denied = await requireKeyPoints();
+        if (denied) return denied;
+        const id = String(args.id || '').trim();
+        if (!id) return { error: '缺少事件 id' };
+        const { events, keyPoints } = await storageGet(chrome.storage.local, ['events', 'keyPoints']);
+        const list = events || [];
+        const ev = list.find(e => e.id === id);
+        if (!ev) return { error: `事件 ${id} 不存在` };
+        if (ev.archived) return { error: '该事件已归档，不可修改' };
+        if (args.key_point_text !== undefined) {
+            const kp = String(args.key_point_text).trim();
+            if (kp && !(keyPoints || []).some(k => k.text === kp)) {
+                return { error: `关联要点「${kp}」不存在` };
+            }
+            ev.keyPointText = kp;
+        }
+        if (args.content !== undefined) {
+            const c = String(args.content).trim();
+            if (!c) return { error: '事件内容不能为空' };
+            ev.content = c;
+        }
+        if (args.time !== undefined) {
+            const t = String(args.time).trim();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return { error: 'time 需为 YYYY-MM-DD 格式' };
+            ev.time = t;
+        }
+        if (args.status !== undefined) {
+            if (!['pending', 'accurate', 'wrong'].includes(args.status)) return { error: 'status 需为 pending / accurate / wrong' };
+            ev.status = args.status;
+        }
+        await storageSet(chrome.storage.local, { events: list });
+        const result = { ok: true, event: ev };
+        const remind = staleEventReminder(list);
+        if (remind) result.remind = remind;
+        return result;
+    },
+    async delete_event(args) {
+        const denied = await requireKeyPoints();
+        if (denied) return denied;
+        const id = String(args.id || '').trim();
+        if (!id) return { error: '缺少事件 id' };
+        const { events } = await storageGet(chrome.storage.local, 'events');
+        const list = events || [];
+        if (!list.some(e => e.id === id)) return { error: `事件 ${id} 不存在` };
+        await storageSet(chrome.storage.local, { events: list.filter(e => e.id !== id) });
+        return { ok: true, id };
+    },
+    async add_stock_to_portfolio(args) {
+        const name = String(args.name || '').trim();
+        if (!name) return { error: '股票名称不能为空' };
+        const portfolio = String(args.portfolio || '持仓').trim();
+        const { portfolios, activePortfolio, stockList } = await storageGet(chrome.storage.local, ['portfolios', 'activePortfolio', 'stockList']);
+        const combos = portfolios || {};
+        const target = combos[portfolio];
+        if (!target) return { error: `组合「${portfolio}」不存在`, available: Object.keys(combos) };
+        const list = target.stockList || (target.stockList = []);
+        // 与手动添加一致：由名称拼接问财搜索地址，按 URL 判重
+        const url = stockSearchUrl(name);
+        if (list.some(s => String(s.url || '') === url)) return { error: `「${name}」已在组合「${portfolio}」中` };
+        // 与 popup 手动添加（saveStock 新建分支）同款条目结构：名称留空等首次抓取回填
+        list.push({
+            url, name: '', code: '', prefix: '',
+            startPrice: null, currentPrice: null, percent: null,
+            importPrice: null,
+            targetPercentLe: null, targetPercentGe: null,
+            importTargetPercentLe: null, importTargetPercentGe: null,
+            stopRunning: false, notifiedDaily: false, notifiedImport: false,
+            inTrash: false, pinned: false, pinOrder: null, createdAt: Date.now(),
+        });
+        // 与手动 saveAndRender 一致：同步活动组合镜像后写回 storage
+        const mirror = (combos[activePortfolio] && combos[activePortfolio].stockList) || stockList || [];
+        await storageSet(chrome.storage.local, { portfolios: combos, stockList: mirror });
+        // 与手动保存后一致：立即访问一次网址回填数据（名称/代码/现价），不等定时
+        chrome.runtime.sendMessage({ action: 'refreshOne', url });
+        return { ok: true, name, portfolio, url, hint: '已按手动添加流程保存并立即抓取回填' };
+    },
+    async move_stock_to_combo(args) {
+        const name = String(args.name || '').trim();
+        if (!name) return { error: '股票名称不能为空' };
+        const target = String(args.target_portfolio || '观察').trim();
+        const { portfolios, activePortfolio } = await storageGet(chrome.storage.local, ['portfolios', 'activePortfolio']);
+        const combos = portfolios || {};
+        if (!combos[target]) return { error: `目标组合「${target}」不存在`, available: Object.keys(combos) };
+        let from = args.source_portfolio ? String(args.source_portfolio).trim() : (combos[activePortfolio] ? activePortfolio : null);
+        if (from && !combos[from]) return { error: `来源组合「${from}」不存在` };
+        let stock = null;
+        if (from) stock = findStockByName(combos[from].stockList, name);
+        if (!stock) {
+            // 来源未命中则全局查找（忽略首尾空格）
+            for (const [cn, c] of Object.entries(combos)) {
+                const hit = findStockByName(c.stockList, name);
+                if (hit) { stock = hit; from = cn; break; }
+            }
+        }
+        if (!stock) return { error: `未找到股票「${name}」，可先用「增加股票」加入持仓组合` };
+        if (from === target) return { ok: true, name, from, to: target, already: true };
+        // 目标组合已存在同名股票：仅从来源删除，避免重复（如观察已持有该股时的卖出清仓）
+        if (findStockByName(combos[target].stockList, name)) {
+            combos[from].stockList = (combos[from].stockList || []).filter(s => s !== stock);
+            const mirror = (combos[activePortfolio] && combos[activePortfolio].stockList) || [];
+            await storageSet(chrome.storage.local, { portfolios: combos, stockList: mirror });
+            chrome.runtime.sendMessage({ action: 'refresh' });
+            return { ok: true, name, from, to: target, removed: true, hint: `目标组合「${target}」已有同名股票，已仅从「${from}」删除，未重复添加` };
+        }
+        combos[from].stockList = (combos[from].stockList || []).filter(s => s !== stock);
+        (combos[target].stockList || (combos[target].stockList = [])).push(stock);
+        const mirror = (combos[activePortfolio] && combos[activePortfolio].stockList) || [];
+        await storageSet(chrome.storage.local, { portfolios: combos, stockList: mirror });
+        chrome.runtime.sendMessage({ action: 'refresh' });
+        return { ok: true, name, from, to: target };
     },
     async get_current_view() {
         const { currentView } = await storageGet(chrome.storage.local, 'currentView');
@@ -219,6 +421,90 @@ const toolExecutors = {
             content: r.truncated ? r.content + '\n（已截断，可让 AI 分段读取）' : r.content,
         };
     },
+    async read_parquet(args) {
+        const dir = await readyRoot(workspaceHandles, args && args.root);
+        const relPath = String(args && args.path || '').trim();
+        if (!relPath.toLowerCase().endsWith('.parquet')) return { error: 'path 必须指向 .parquet 文件' };
+        const limit = Math.min(Math.max(parseInt(args && args.limit, 10) || 100, 1), 500);
+        const rowStart = Math.max(parseInt(args && args.row_start, 10) || 0, 0);
+        const columns = Array.isArray(args && args.columns) && args.columns.length
+            ? args.columns.map(c => String(c)).filter(Boolean) : undefined;
+        const binary = await readFileBinary(dir.handle, relPath);
+        const metadata = await parquetMetadataAsync(binary.buffer);
+        const schema = parquetSchema(metadata);
+        const columnNames = (schema.children || []).map(c => c.element.name);
+        const selected = columns ? columns.filter(c => columnNames.includes(c)) : undefined;
+        if (columns && selected.length !== columns.length) {
+            return { error: '指定列不存在', columns: columnNames, missing: columns.filter(c => !columnNames.includes(c)) };
+        }
+        const rows = await parquetReadObjects({
+            file: binary.buffer,
+            columns: selected,
+            rowStart,
+            rowEnd: rowStart + limit,
+            compressors,
+        });
+        return { root: dir.name, path: relPath, size: binary.size, columns: columnNames, totalRows: Number(metadata.num_rows), rowStart, shown: rows.length, rows: toJson(rows) };
+    },
+    async read_stock_kline(args) {
+        const dir = await readyRoot(workspaceHandles, args && args.root);
+        const days = Math.min(Math.max(parseInt(args && args.days, 10) || 7, 1), 60);
+        // 1) 解析股票代码（支持代码或名称）
+        const resolved = await resolveStockCode(args);
+        if (resolved.error) return resolved;
+        const { code, name } = resolved;
+        // 2) 读 parquet 缓存
+        const cache = await readStockFromParquet(dir.handle, code, days);
+        // 3) 缓存缺最近交易日数据 → 依次用小石 API、东方财富 adata 兜底补齐
+        const expected = lastTradingDayStr(new Date());
+        const isEtf = isEtfCode(code);
+        let source = cache.length ? 'parquet' : 'none';
+        let apiRows = [];
+        let apiWarning = null;
+        const cacheLast = cache.length ? cache[cache.length - 1].date : '';
+        if (!cache.length || cacheLast < expected) {
+            try {
+                apiRows = await xiaoshiDailyKline(code, { limit: days, timeoutMs: 15000 });
+                source = cache.length ? 'parquet+xiaoshi' : 'xiaoshi';
+            } catch (e) {
+                dbg('xiaoshi kline fetch failed', e);
+                apiWarning = '小石 API 未补齐（' + (e && e.message || e) + '）';
+                // 小石不可用 → 东方财富 adata 兜底（个股/ETF 分别走对应接口）
+                try {
+                    const adataRows = isEtf
+                        ? await adataGetMarketEtfDaily(code.split('.')[0], { startDate: klineStartDate(days) })
+                        : await adataGetMarketDaily(code.split('.')[0], { startDate: klineStartDate(days), adjustType: 1 });
+                    apiRows = adataToKlineRows(adataRows);
+                    source = cache.length ? 'parquet+adata' : 'adata';
+                    apiWarning = '小石 API 不可用，已改用东方财富/同花顺数据';
+                } catch (e2) {
+                    dbg('adata kline fetch failed', e2);
+                    apiWarning += '；东方财富 adata 也未补齐（' + (e2 && e2.message || e2) + '）';
+                }
+            }
+        }
+        // 4) 合并去重（API 优先），取近 days 天
+        const rows = mergeKlineRows(cache, apiRows, days);
+        if (!rows.length) {
+            return {
+                root: dir.name, code, name,
+                error: '未读取到该股票数据：parquet 缓存无记录，且小石 / 东方财富接口均拉取失败' + (apiWarning ? '（' + apiWarning + '）' : ''),
+            };
+        }
+        return { root: dir.name, code, name, days, source, cacheLastDate: cacheLast || null, apiLastDate: apiRows.length ? apiRows[apiRows.length - 1].date : null, warning: apiWarning, rows };
+    },
+    async get_stock_quote(args) {
+        // 实时行情（不经页面）：优先实时接口；调用方需传股票名称或代码
+        const resolved = await resolveStockCode(args);
+        if (resolved.error) return resolved;
+        const { code, name } = resolved;
+        try {
+            const q = await xiaoshiQuote(code, { timeoutMs: 15000 });
+            return { code, name, quote: q, warning: q.is_stale ? '行情可能已过期（is_stale=' + q.is_stale + '）' : null };
+        } catch (e) {
+            return { code, name, error: '小石实时行情拉取失败：' + (e && e.message || e) };
+        }
+    },
     async write_file(args) {
         const dir = await readyRoot(workspaceHandles, args && args.root);
         return writeFile(dir.handle, args.path, args.content);
@@ -233,6 +519,197 @@ const toolExecutors = {
 function summarizeList(list, pick, limit = 50) {
     const items = (list || []).slice(0, limit).map(pick);
     return { total: (list || []).length, shown: items.length, items };
+}
+
+// ---------------- 股票 K 线（parquet 缓存 + 小石 API）辅助 ----------------
+
+// 解析股票代码：优先用 args.code（支持 001309 / 001309.SZ / 001309.SH）；
+// 仅给名称时从扩展持仓列表按名称匹配，匹配不到返回可操作错误
+async function resolveStockCode(args) {
+    let code = String(args && args.code || '').trim();
+    let name = String(args && args.name || '').trim();
+    if (!code && !name) return { error: '请提供股票名称或代码（name / code）' };
+
+    if (code) {
+        const m = code.match(/^(\d{6})([.](SZ|SH|BJ|HK|US))?$/i);
+        if (!m) return { error: '代码格式无效，应为 6 位数字或带后缀如 001309.SZ' };
+        const digits = m[1];
+        const suffix = (m[2] || '').toUpperCase();
+        if (suffix) return { code: digits + suffix, name };
+        // 无后缀时按 6 位 A 股习惯推断：6 开头沪市，其余深市（ETF 同规则）
+        const inferred = digits.startsWith('6') ? digits + '.SH' : digits + '.SZ';
+        return { code: inferred, name };
+    }
+
+    // 按名称从扩展持仓查找（含 trash 的股票也带上）
+    const { stockList, portfolios } = await storageGet(chrome.storage.local, ['stockList', 'portfolios']);
+    const candidates = [...(stockList || [])];
+    for (const p of Object.values(portfolios || {})) candidates.push(...(p.stockList || []));
+    const hit = findStockByName(candidates, name);
+    if (hit && hit.code) {
+        const suffix = hit.prefix || (hit.code.startsWith('6') ? 'SH' : 'SZ');
+        return { code: hit.code + '.' + suffix, name };
+    }
+    // 持仓中未找到 → 用小石搜索接口解析名称→代码（服务器不稳定时返回可重试错误）
+    try {
+        const items = await xiaoshiSearchStock(name, { timeoutMs: 15000 });
+        const best = items.find(i => i.name === name) || items[0];
+        if (best && best.symbol) return { code: best.symbol, name };
+        return { error: `未能在小石搜索到「${name}」的股票代码，请核对名称后重试` };
+    } catch (e) {
+        return { error: `小石搜索接口不可用，无法解析「${name}」的代码：${e && e.message || e}。可改传 6 位代码（如 001309）` };
+    }
+}
+
+// 读取 parquet 缓存中某只股票近 days 天数据；缓存路径 data/a_share_daily/qfq/data_{year}.parquet。
+// 数据按年度拆分，跨年需读多个文件：从当年往前逐次尝试 data_{year}.parquet，
+// 直到累计行数超过需要的天数或读完可用的年份为止
+async function readStockFromParquet(rootHandle, code, days) {
+    const qfqPath = 'data/a_share_daily/qfq';
+    const entries = await listDir(rootHandle, qfqPath).catch(() => []);
+    const years = entries
+        .filter(e => e.type === 'file' && /^data_(\d{4})\.parquet$/.test(e.name))
+        .map(e => e.name.match(/^data_(\d{4})\.parquet$/)[1])
+        .sort();
+    if (!years.length) return [];
+    const thisYear = new Date().getFullYear();
+    const needRows = days + 5; // 余量：抓取周期比 1 天短、节假日等场景
+    const rows = [];
+    // 从最近年份向前读（当年优先，最多回溯到缓存最早年份）
+    for (const y of years.slice().reverse()) {
+        if (Number(y) > thisYear) continue;
+        const r = await readParquetStockYear(rootHandle, qfqPath, code, y).catch(err => { dbg('parquet year failed', y, err); return []; });
+        rows.push(...r);
+        if (rows.length >= needRows) break;
+    }
+    return rows.sort((a, b) => a.date < b.date ? -1 : 1).slice(-days);
+}
+
+// 读取单个年度 parquet 中某股票的全部行（按 code 精确过滤）
+async function readParquetStockYear(rootHandle, qfqPath, code, year) {
+    const relPath = qfqPath + '/data_' + year + '.parquet';
+    const binary = await readFileBinary(rootHandle, relPath);
+    const found = await parquetReadObjects({
+        file: binary.buffer,
+        columns: ['code', 'date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'change_pct', 'turnover_pct'],
+        filter: { code },
+        compressors,
+    });
+    return found.map(r => ({
+        date: fmtKlineDate(r.date),
+        open: r.open ?? null,
+        high: r.high ?? null,
+        low: r.low ?? null,
+        close: r.close ?? null,
+        volume: r.volume ?? null,
+        amount: r.amount ?? null,
+        change_pct: r.change_pct ?? null,
+        turnover_pct: r.turnover_pct ?? null,
+    }));
+}
+
+// parquet 里 date 是 Date/ISO 字符串，统一为 YYYY-MM-DD
+function fmtKlineDate(d) {
+    if (!d) return '';
+    if (d instanceof Date) {
+        return d.toISOString().slice(0, 10);
+    }
+    const s = String(d);
+    return s.slice(0, 10);
+}
+
+// 合并缓存与 API 行：按日期去重（API 优先），升序取最后 days 条
+function mergeKlineRows(cache, api, days) {
+    const map = new Map();
+    for (const r of api) map.set(r.date, r); // API 后写入覆盖同日期缓存
+    for (const r of cache) if (!map.has(r.date)) map.set(r.date, r);
+    return [...map.values()].sort((a, b) => a.date < b.date ? -1 : 1).slice(-days);
+}
+
+// 判断是否为 ETF：6 位数字且以 159/51/58 开头（与扩展监控逻辑同规则，见 shared/utils.js etfPrefixForCode）
+function isEtfCode(code) {
+    const m = String(code || '').match(/^\d{6}/);
+    if (!m) return false;
+    const c = m[0];
+    return c.startsWith('159') || c.startsWith('51') || c.startsWith('58');
+}
+
+// 最近一个交易日（简化：跳过周末；节假日以缓存/API 实际日期为准，多余补齐无副作用）
+function lastTradingDayStr(date) {
+    const d = new Date(date);
+    d.setHours(12, 0, 0, 0);
+    const dow = d.getDay();
+    if (dow === 0) d.setDate(d.getDate() - 2);
+    else if (dow === 6) d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+}
+
+// adata（东方财富）日线接口需要的开始日期：预留余量（含周末/节假日）
+function klineStartDate(days) {
+    const d = new Date();
+    d.setDate(d.getDate() - days * 2 - 5);
+    return d.toISOString().slice(0, 10);
+}
+
+// 把 adata 返回的 K 线行统一为内部格式（date/open/high/low/close/volume/amount/change_pct/turnover_pct）
+function adataToKlineRows(rows) {
+    return (rows || []).map(r => ({
+        date: String(r.trade_date || r.date || '').slice(0, 10),
+        open: r.open ?? null,
+        high: r.high ?? null,
+        low: r.low ?? null,
+        close: r.close ?? null,
+        volume: r.volume ?? null,
+        amount: r.amount ?? null,
+        change_pct: r.change_pct ?? null,
+        turnover_pct: r.turnover_ratio ?? r.turnover_pct ?? null,
+    }));
+}
+
+// ---------------- 要点 / 事件工具辅助 ----------------
+// 要点功能开关：全局设置「启用要点管理功能」关闭（hideKeyPoints=true）时，
+// 要点/事件工具全部拒绝执行，提示用户先开启
+async function requireKeyPoints() {
+    const { hideKeyPoints } = await storageGet(chrome.storage.sync, 'hideKeyPoints');
+    if (hideKeyPoints) {
+        return { error: '要点管理功能未开启。请先在插件全局设置中开启「启用要点管理功能」，再执行本操作', disabled: true };
+    }
+    return null;
+}
+
+// 今天日期 YYYY-MM-DD
+function todayStr() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+
+// 查找超过一周仍未归档的事件，返回提醒文案（无则 null），供事件类工具结果附带
+function staleEventReminder(events) {
+    const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+    const stale = (events || []).filter(e => !e.archived && e.time && new Date(e.time).getTime() < weekAgo);
+    if (stale.length === 0) return null;
+    const names = stale.map(e => `「${e.content}」（${e.time}，${eventStatusLabel(e.status)}）`).join('；');
+    return '以下事件已超过一周仍未归档，请提醒用户补充验证结果并归档：' + names;
+}
+
+function eventStatusLabel(s) {
+    return { pending: '待预测', accurate: '准确', wrong: '误判' }[s] || s;
+}
+
+// 按名称/代码构造可监控的搜索地址：ETF（159/51/58）问财不支持走雪球个股页，其余问财搜索
+function stockSearchUrl(item) {
+    if (/^(159|51|58)\d{3}$/.test(item)) {
+        const p = item.startsWith('159') ? 'SZ' : 'SH';
+        return `https://xueqiu.com/S/${p}${item}`;
+    }
+    return `https://www.iwencai.com/screener/result?w=${encodeURIComponent(item)}&querytype=stock`;
+}
+
+// 按名称匹配股票（忽略首尾空格，兼容抓取回填名称带尾随空格）
+function findStockByName(list, name) {
+    const n = String(name || '').trim();
+    return (list || []).find(s => String(s.name || '').trim() === n) || null;
 }
 
 // ---------------- 长期记忆 ----------------
@@ -264,7 +741,12 @@ async function addMemory(content) {
 // 系统提示词：每轮组装，记忆新写入后下一轮立即生效
 function buildSystemPrompt() {
     const lines = [
-        '你是「同花顺问财」Chrome 扩展的 AI 助手。可用工具：查看/切换持仓组合、读取股票行情、要点、事件、设置；读写用户授权的工作目录文件（主目录 + 附加目录，root 参数用目录名寻址；软链接不可访问，需授权真实目录为附加根），若设置了项目主目录，可尝试访问CLAUDE.md、.claude文件夹、.claude/skills等文件；通过 save_memory 记住用户偏好。回答使用中文。',
+        '你是「同花顺问财」Chrome 扩展的 AI 助手。可用工具：查看/切换持仓组合、读取股票行情、创建/修改/删除要点与事件、读写设置；读写用户授权的工作目录文件（主目录 + 附加目录，root 参数用目录名寻址；软链接不可访问，需授权真实目录为附加根），若设置了项目主目录，可尝试访问CLAUDE.md、.claude文件夹、.claude/skills等文件；也可以用 read_parquet 读取授权工作目录中的 .parquet 股票数据，该工具会返回列名、总行数和限定行数据，优先传 columns、row_start、limit 控制结果大小；通过 save_memory 记住用户偏好。要点/事件工具需要全局设置开启「启用要点管理功能」，未开启时工具会返回提示，此时应引导用户先在插件全局设置开启；若工具返回「事件超过一周未归档」的提醒，请向用户转达并建议补充验证结果、归档。回答使用中文。',
+        '',
+        '股票最新行情数据获取规范：',
+        '- 需要某只股票近 N 天日线（股价/成交量）时，直接用 read_stock_kline 工具，传股票名称或代码即可；该工具自动读取工作目录 parquet 缓存（data/a_share_daily/qfq/data_*.parquet），若缓存缺最近交易日数据会依次调用小石量化 API、东方财富 adata 接口补齐，无需手动拼接路径。',
+        '- 需要某只股票实时行情（最新价/涨跌幅）时，用 get_stock_quote 工具。',
+        '- 小石/东方财富数据拉取能力已直接封装在扩展内（无需读取任何 skill 文件即可调用）；若工作目录中可访问 .claude/skills/xiaoshi-quant-expert，仅当涉及更深层的量化/回测接口时可按需阅读其中的 references/api.md 作参考。',
     ];
     if (memoryItems.length > 0) {
         lines.push('', '[长期记忆]：');
@@ -353,13 +835,10 @@ async function switchSession(id) {
     chatInput.focus();
 }
 
-// 新建会话（命名可选）
+// 新建会话：直接命名「新会话」，不弹窗（有首条消息后 saveChat 会自动以前 20 字作标题）
 async function createSession() {
-    const name = prompt('新会话名称（可留空，默认「新会话」）：', '');
-    if (name === null) return;
-    const title = name.trim() || '新会话';
     const id = newChatId();
-    sessions[id] = { id, title, messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+    sessions[id] = { id, title: '新会话', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
     await persistSessions();
     await switchSession(id);
 }
@@ -403,6 +882,7 @@ async function clearSession() {
     renderPastePreviews();
     followStream = true;
     scrollDownBtn.hidden = true;
+    updateIntentBubbles(); // 会话已清空，重新显示快捷意图气泡
     await saveChat();
 }
 
@@ -724,7 +1204,140 @@ scrollDownBtn.addEventListener('click', () => {
     scrollDownBtn.hidden = true;
 });
 
-// 消息一律 textContent 渲染（防 XSS）；content 可为多模态数组
+// ---------------- Markdown 安全渲染（防 XSS：先 HTML 转义，再解析白名单语法） ----------------
+function escapeHtml(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// 链接只允许 http/https/mailto，其余降级为纯文本（防止 javascript: 等伪协议）
+function escapeUrl(u) {
+    const s = String(u || '').trim().replace(/&amp;/g, '&');
+    return /^(https?:|mailto:)/i.test(s) ? s : '#';
+}
+
+// 行内语法：行内代码（先占位隔离，避免后续 ** 等被误解析）→ 链接 → 加粗/斜体/删除线
+const MD_CODE_MARK = ''; // 行内代码占位符（用控制字符隔离，避免被 * ` 等二次解析）
+function inlineMd(escaped) {
+    let s = escaped;
+    const codes = [];
+    s = s.replace(/`([^`\n]+)`/g, (m, c) => { codes.push(c); return MD_CODE_MARK + (codes.length - 1) + MD_CODE_MARK; });
+    s = s.replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, (m, txt, url) => {
+        return '<a href="' + escapeHtml(escapeUrl(url)) + '" target="_blank" rel="noopener">' + txt + '</a>';
+    });
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
+    s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+    s = s.replace(new RegExp(MD_CODE_MARK + '(\\d+)' + MD_CODE_MARK, 'g'), (m, n) => '<code>' + codes[n] + '</code>');
+    return s;
+}
+
+// 块级 Markdown → HTML（只输出白名单标签：p/h1-h4/ul/ol/li/pre/code/blockquote/table/th/td/hr/a/strong/em/del）
+function mdToHtml(text) {
+    const lines = String(text ?? '').split(/\r?\n/);
+    let html = '';
+    let inCode = false;
+    let codeBuf = [];
+    let listType = null; // 'ul' | 'ol'
+    const para = [];
+    let tableBuf = null; // 连续表格行缓冲（含表头/分隔行/数据行）
+
+    const flushPara = () => {
+        if (para.length) {
+            html += '<p>' + inlineMd(para.map(escapeHtml).join('<br>')) + '</p>';
+            para.length = 0;
+        }
+    };
+    const flushList = () => {
+        if (listType) { html += '</' + listType + '>'; listType = null; }
+    };
+    // 缓冲的行里第二行必须是分隔行（仅含 | - : 空格）才按表格渲染，否则回退为段落
+    const flushTable = () => {
+        if (!tableBuf || !tableBuf.length) return;
+        if (tableBuf.length < 2 || !/^[\s|:-]+$/.test(tableBuf[1].replace(/\s*\|/g, '|')) || !/-/.test(tableBuf[1])) {
+            para.push(...tableBuf);
+            tableBuf = null;
+            flushPara();
+            return;
+        }
+        const cells = row => row.trim().replace(/^\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+        const header = cells(tableBuf[0]);
+        const body = tableBuf.slice(2).map(cells);
+        let t = '<table><thead><tr>';
+        t += header.map(h => '<th>' + inlineMd(escapeHtml(h)) + '</th>').join('');
+        t += '</tr></thead><tbody>';
+        for (const row of body) {
+            if (row.length !== header.length) continue; // 列数不齐的行跳过
+            t += '<tr>' + row.map(c => '<td>' + inlineMd(escapeHtml(c)) + '</td>').join('') + '</tr>';
+        }
+        t += '</tbody></table>';
+        html += t;
+        tableBuf = null;
+    };
+
+    for (const line of lines) {
+        if (/^```/.test(line)) {
+            if (inCode) {
+                html += '<pre><code>' + codeBuf.join('\n') + '</code></pre>';
+                codeBuf = []; inCode = false;
+            } else {
+                flushPara(); flushList(); flushTable(); inCode = true;
+            }
+            continue;
+        }
+        if (inCode) { codeBuf.push(escapeHtml(line)); continue; }
+
+        // 表格行：以 | 开头且以 | 结尾 → 进入表格缓冲
+        if (/^\s*\|.*\|\s*$/.test(line)) {
+            flushPara(); flushList();
+            if (!tableBuf) tableBuf = [];
+            tableBuf.push(line);
+            continue;
+        }
+        if (tableBuf) { flushTable(); }
+
+        const heading = line.match(/^(#{1,4})\s+(.*)$/);
+        if (heading) {
+            flushPara(); flushList();
+            const lv = heading[1].length;
+            html += '<h' + lv + '>' + inlineMd(escapeHtml(heading[2])) + '</h' + lv + '>';
+            continue;
+        }
+        if (/^\s*([-*_])\s*\1\s*\1\s*$/.test(line)) {
+            flushPara(); flushList(); html += '<hr>'; continue;
+        }
+        const quote = line.match(/^>\s?(.*)$/);
+        if (quote) {
+            flushPara(); flushList();
+            html += '<blockquote>' + inlineMd(escapeHtml(quote[1])) + '</blockquote>';
+            continue;
+        }
+        const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+        if (ul) {
+            flushPara();
+            if (listType !== 'ul') { flushList(); html += '<ul>'; listType = 'ul'; }
+            html += '<li>' + inlineMd(escapeHtml(ul[1])) + '</li>';
+            continue;
+        }
+        const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+        if (ol) {
+            flushPara();
+            if (listType !== 'ol') { flushList(); html += '<ol>'; listType = 'ol'; }
+            html += '<li>' + inlineMd(escapeHtml(ol[1])) + '</li>';
+            continue;
+        }
+        if (line.trim() === '') {
+            flushPara(); flushList();
+        } else {
+            para.push(line);
+        }
+    }
+    flushPara(); flushList(); flushTable();
+    if (inCode) html += '<pre><code>' + codeBuf.join('\n') + '</code></pre>'; // 未闭合围栏兜底
+    return html || '<p></p>';
+}
+
+// 消息渲染：Markdown 安全渲染（防 XSS）；content 可为多模态数组
 // [{type:'text',text} , {type:'image_url',image_url:{url}}]，图片渲染为缩略图。
 // entry 传入会话历史条目时（user/assistant）附带悬停删除按钮，点击从历史与 DOM 移除该条
 function appendMessage(role, content, entry) {
@@ -735,7 +1348,8 @@ function appendMessage(role, content, entry) {
             if (!part) continue;
             if (typeof part === 'string' || part.type === 'text') {
                 const span = document.createElement('span');
-                span.textContent = (typeof part === 'string' ? part : part.text) || '';
+                span.className = 'msg-md';
+                span.innerHTML = mdToHtml((typeof part === 'string' ? part : part.text) || '');
                 el.appendChild(span);
             } else if (part.type === 'image_url') {
                 const url = part.image_url && part.image_url.url;
@@ -748,7 +1362,7 @@ function appendMessage(role, content, entry) {
             }
         }
     } else {
-        el.textContent = content ?? '';
+        el.innerHTML = mdToHtml(content ?? '');
     }
     // 可删除消息：user / assistant 且持历史条目
     if (entry && entry.uid && (role === 'user' || role === 'assistant')) {
@@ -772,14 +1386,17 @@ function appendMessage(role, content, entry) {
 }
 
 let currentAssistantEl = null;
+let currentAssistantRaw = ''; // 流式累积的原始文本（每次 delta 到达后整体重渲染 Markdown）
 
 function beginAssistant() {
     currentAssistantEl = appendMessage('assistant', '');
+    currentAssistantRaw = '';
 }
 
 function appendToCurrentAssistant(delta) {
     if (!currentAssistantEl) beginAssistant();
-    currentAssistantEl.textContent += delta;
+    currentAssistantRaw += delta;
+    currentAssistantEl.innerHTML = mdToHtml(currentAssistantRaw);
     maybeScroll();
 }
 
@@ -832,6 +1449,8 @@ function renderHistory() {
     // 切换会话后重置跟随状态与悬浮按钮
     followStream = true;
     scrollDownBtn.hidden = true;
+    // 新对话（空会话）时显示快捷意图气泡
+    updateIntentBubbles();
 }
 
 // ---------------- 工作目录状态条（多根目录） ----------------
@@ -1093,6 +1712,134 @@ async function reauthorizePendingInGesture() {
     return changed;
 }
 
+// ---------------- 新对话快捷意图气泡 ----------------
+// 仅当前会话为空（新对话/已清空）时在输入框上方显示，点击后用输入框文本直接执行对应操作
+function updateIntentBubbles() {
+    if (!intentBubblesEl) return;
+    intentBubblesEl.hidden = chatMessages.length > 0;
+}
+
+function intentLabel(intent) {
+    return { keypoint: '增加要点', event: '增加事件', stock: '增加股票' }[intent] || intent;
+}
+
+// 点击气泡：读取输入框文本 → 解析 → 直接调用工具执行（不经模型，即时反馈）
+async function handleIntentBubble(intent) {
+    const raw = chatInput.value.trim();
+    if (!raw) {
+        appendMessage('system', '请先在输入框填写内容，再选择快捷意图（如「我买入了贵州茅台」）');
+        chatInput.focus();
+        return;
+    }
+    let result;
+    if (intent === 'keypoint') result = await parseAndCreateKeyPoint(raw);
+    else if (intent === 'event') result = await parseAndCreateEvent(raw);
+    else if (intent === 'stock') result = await parseAndRecordStockTrade(raw);
+    // 回填会话：用户消息 + 执行结果
+    chatInput.value = '';
+    pendingImages = [];
+    renderPastePreviews();
+    const userMsg = { role: 'user', content: `【${intentLabel(intent)}】${raw}`, ts: Date.now(), uid: genUid('m') };
+    chatMessages.push(userMsg);
+    appendMessage('user', userMsg.content, userMsg);
+    const reply = { role: 'assistant', content: result.text, ts: Date.now(), uid: genUid('m') };
+    chatMessages.push(reply);
+    appendMessage('assistant', reply.content, reply);
+    trimChat();
+    saveChat();
+    updateIntentBubbles();
+}
+
+// 【增加要点】：解析「文本 权重N」/结尾数字作为权重（缺省 5）
+async function parseAndCreateKeyPoint(raw) {
+    let text = raw.replace(/^增加要点[:：]?\s*/, '').trim();
+    let weight = null;
+    let m = text.match(/权重\s*[:：]?\s*(\d{1,2})/);
+    if (m) {
+        weight = parseInt(m[1], 10);
+        text = text.replace(/权重\s*[:：]?\s*\d{1,2}/, '').trim();
+    } else {
+        m = text.match(/(?:^|\s)(\d{1,2})\s*$/);
+        if (m) {
+            weight = parseInt(m[1], 10);
+            text = text.replace(/(?:^|\s)\d{1,2}\s*$/, '').trim();
+        }
+    }
+    if (!text) return { ok: false, text: '未识别到要点内容，请填写如「回调不破位 权重 8」' };
+    const res = await toolExecutors.create_key_point({ text, weight: weight ?? 5 });
+    if (res && res.error) return { ok: false, text: res.error };
+    return { ok: true, text: `已增加要点「${text}」（权重 ${weight ?? 5}）` };
+}
+
+// 【增加事件】：解析日期（今天/今日、MM.DD/MM-DD/MM/DD），缺省今天；
+// 创建后询问是否关联要点（列出全部要点，输入数字选择）
+async function parseAndCreateEvent(raw) {
+    let text = raw.replace(/^增加事件[:：]?\s*/, '').trim();
+    if (!text) return { ok: false, text: '未识别到事件内容，请填写如「恒瑞医药机会 7.17 待评测」' };
+    let time = null;
+    if (/今天|今日/.test(text)) {
+        time = todayStr();
+        text = text.replace(/今天|今日/g, '').trim();
+    } else {
+        const m = text.match(/(\d{1,2})\s*[./-]\s*(\d{1,2})(?![\d])/);
+        if (m) {
+            const now = new Date();
+            time = `${now.getFullYear()}-${String(parseInt(m[1], 10)).padStart(2, '0')}-${String(parseInt(m[2], 10)).padStart(2, '0')}`;
+            text = text.replace(m[0], '').trim();
+        }
+    }
+    if (!time) time = todayStr();
+    const res = await toolExecutors.create_event({ content: text, time });
+    if (res && res.error) return { ok: false, text: res.error };
+    // 创建后询问是否关联要点：列出全部要点，输入数字选择（留空/非法则跳过）
+    let linkText = '';
+    const { keyPoints } = await storageGet(chrome.storage.local, 'keyPoints');
+    if (Array.isArray(keyPoints) && keyPoints.length > 0) {
+        const options = keyPoints.map((kp, i) => `${i + 1}. ${kp.text}（权重 ${kp.weight}）`).join('\n');
+        const answer = prompt(`已创建事件「${text}」（${time}）\n\n是否关联要点？\n${options}\n\n输入数字选择，或留空跳过：`);
+        const n = parseInt(answer, 10);
+        if (Number.isFinite(n) && n >= 1 && n <= keyPoints.length) {
+            await toolExecutors.update_event({ id: res.event.id, key_point_text: keyPoints[n - 1].text });
+            linkText = `，已关联要点「${keyPoints[n - 1].text}」`;
+        } else {
+            linkText = '，未关联要点';
+        }
+    } else {
+        linkText = '（当前暂无要点，可先创建要点后再编辑关联）';
+    }
+    let reply = `已增加事件「${text}」（${time}）${linkText}`;
+    if (res && res.remind) reply += `；\n${res.remind}`;
+    return { ok: true, text: reply };
+}
+
+// 【增加股票】：识别「买入/卖出」，买入→加入【持仓】，卖出→从【持仓】移到【观察】
+async function parseAndRecordStockTrade(raw) {
+    let text = raw.replace(/^增加股票[:：]?\s*/, '').trim();
+    if (!text) return { ok: false, text: '未识别到股票操作，请填写如「我买入了贵州茅台」或「我卖出了贵州茅台」' };
+    const buyM = text.match(/^(我)?(买入|买进|加仓|建仓|买了|购买)\s*了?\s*/);
+    const sellM = text.match(/^(我)?(卖出|卖了|清仓|减仓)\s*了?\s*/);
+    let action = 'buy';
+    let name = text;
+    if (sellM && (!buyM || sellM[0].length >= (buyM[0] || '').length)) {
+        action = 'sell';
+        name = text.slice(sellM[0].length);
+    } else if (buyM) {
+        name = text.slice(buyM[0].length);
+    }
+    name = name.replace(/[。！!？?.,，、；;]+$/g, '').trim();
+    if (!name) return { ok: false, text: '未识别到股票名称，请填写如「我买入了贵州茅台」' };
+    if (action === 'buy') {
+        const res = await toolExecutors.add_stock_to_portfolio({ name, portfolio: '持仓' });
+        if (res && res.error) return { ok: false, text: res.error };
+        return { ok: true, text: `已将「${name}」加入【持仓】组合${res && res.hint ? '（' + res.hint + '）' : ''}` };
+    }
+    const res = await toolExecutors.move_stock_to_combo({ name, target_portfolio: '观察', source_portfolio: '持仓' });
+    if (res && res.error) return { ok: false, text: res.error };
+    if (res && res.removed) return { ok: true, text: `观察组合已有「${name}」，已从【持仓】删除，不再重复添加` };
+    if (res && res.already) return { ok: true, text: `「${name}」已在【观察】组合中` };
+    return { ok: true, text: `已将「${name}」从【持仓】移动到【观察】组合` };
+}
+
 async function handleSend() {
     const text = chatInput.value.trim();
     if (!text && pendingImages.length === 0) return;
@@ -1131,6 +1878,7 @@ async function handleSend() {
     chatInput.value = '';
     pendingImages = [];
     renderPastePreviews();
+    updateIntentBubbles(); // 会话已非空，隐藏快捷意图气泡
     currentAssistantEl = null;
     setGenerating(true);
     if (imageCount > 0) appendMessage('system', imageCount + ' 张图片已作为视觉输入传给模型');
@@ -1203,6 +1951,10 @@ function bindEvents() {
             event.preventDefault();
             handleSend();
         }
+    });
+    // 快捷意图气泡
+    intentBubbleEls.forEach(btn => {
+        btn.addEventListener('click', () => handleIntentBubble(btn.dataset.intent));
     });
     stopBtn.addEventListener('click', stopGeneration);
     // 会话管理

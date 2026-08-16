@@ -1892,6 +1892,15 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* 导出选择弹窗按钮：占满宽度、左对齐、可换行，便于阅读两项说明 */
+.export-choice-btn {
+  width: 100%;
+  height: auto;
+  padding: 9px 12px;
+  white-space: normal;
+  text-align: left;
+}
+
 /* cron 定时任务列表 */
 .cron-job-list {
   display: flex;

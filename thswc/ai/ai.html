@@ -31,6 +31,12 @@
     <div class="composer">
         <!-- 粘贴/待发送图片预览（可删除） -->
         <div id="pastePreviews" class="paste-previews" hidden></div>
+        <!-- 新对话快捷意图气泡：输入内容后点击即可直接执行 -->
+        <div class="intent-bubbles" id="intentBubbles">
+            <button type="button" class="intent-bubble" data-intent="keypoint" title="将输入内容保存为一条交易要点">＋ 增加要点</button>
+            <button type="button" class="intent-bubble" data-intent="event" title="将输入内容保存为一条预测事件">＋ 增加事件</button>
+            <button type="button" class="intent-bubble" data-intent="stock" title="买入→加入【持仓】，卖出→移到【观察】">＋ 增加股票</button>
+        </div>
         <textarea id="chatInput" rows="3" placeholder="输入消息，Enter 发送 / Shift+Enter 换行（可粘贴截图）"></textarea>
         <div class="composer-actions">
             <!-- 上传文件到工作目录并加载到上下文；未设置工作目录时置灰 -->

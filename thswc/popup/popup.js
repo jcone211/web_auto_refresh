@@ -130,6 +130,10 @@ const paginationBarEl = document.getElementById('paginationBar');
 const exportBtnEl = document.getElementById('exportBtn');
 const importBtnEl = document.getElementById('importBtn');
 const importFileInputEl = document.getElementById('importFileInput');
+const exportChoiceOverlayEl = document.getElementById('exportChoiceOverlay');
+const closeExportChoiceBtnEl = document.getElementById('closeExportChoiceBtn');
+const exportDefaultBtnEl = document.getElementById('exportDefaultBtn');
+const exportSensitiveBtnEl = document.getElementById('exportSensitiveBtn');
 const comboSwitchesEl = document.getElementById('comboSwitches');
 const comboLabelEl = document.getElementById('comboLabel');
 const sortToggleEls = document.querySelectorAll('.sort-toggle');
@@ -601,15 +605,23 @@ function promptComboName(message, prefilled) {
 }
 
 // 全量导出：导出插件全部数据和配置
-// 注：白名单显式枚举——aiProviders/aiActiveProviderId（AI 接口配置，含 Key）与
-// aiChats/aiMemory（AI 会话与记忆）均不在白名单、不随备份导出，勿在下方列表新增敏感键
-async function handleExport() {
-    if (!confirm('将导出插件全部数据和配置（所有组合、要点、事件、设置等），确定继续？')) return;
-    const localData = await storageGet(chrome.storage.local, ['stockList', 'portfolios', 'activePortfolio', 'currentView', 'keyPoints', 'events']);
-    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio', 'hideKeyPoints', 'enableTrash', 'refreshOnOpen', 'enableQuickImport', 'quickImportInStockWindow', 'enableAi', 'dataSource', 'cronJobs']);
+// 两种导出都不携带对话中的 base64 原始图片/文件数据，均以占位文本代替：
+//   上传的图片/文件保留原「[用户上传图片/文件：<文件名>...]」占位，粘贴图片替换为「[用户上传图片：粘贴图片]」；
+// sensitive=false（默认）：不含任何 API Key（aiProviders/aiActiveProviderId/apiKey）；
+// sensitive=true（敏感）：多导出小石 / AI 接口的 API Key
+async function handleExport(sensitive) {
+    if (!confirm(sensitive
+        ? '将导出全部数据（含小石 / AI 接口的 API Key；对话图片/文件不携带原始数据，以占位文本代替），请妥善保管，确定继续？'
+        : '将导出默认数据（组合、要点、事件、设置、AI 对话与记忆；不含 API Key，对话图片/文件以 [用户上传图片：xx.png] 等占位文本代替），确定继续？')) return;
+    const localKeys = ['stockList', 'portfolios', 'activePortfolio', 'currentView', 'keyPoints', 'events', 'aiChats', 'aiMemory'];
+    const syncKeys = ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio', 'hideKeyPoints', 'enableTrash', 'refreshOnOpen', 'enableQuickImport', 'quickImportInStockWindow', 'enableAi', 'dataSource', 'cronJobs', 'aiMaxToolIterations'];
+    if (sensitive) syncKeys.push('apiKey', 'aiProviders', 'aiActiveProviderId');
+    const localData = await storageGet(chrome.storage.local, localKeys);
+    const syncData = await storageGet(chrome.storage.sync, syncKeys);
     const payload = {
-        version: 2,
+        version: 3,
         type: 'full-backup',
+        sensitive: !!sensitive,
         exportedAt: new Date().toISOString(),
         local: {
             stockList: localData.stockList || [],
@@ -618,6 +630,8 @@ async function handleExport() {
             currentView: localData.currentView || 'list',
             keyPoints: localData.keyPoints || [],
             events: localData.events || [],
+            aiChats: sanitizeAiChats(localData.aiChats) || {},
+            aiMemory: localData.aiMemory || null,
         },
         sync: {
             refreshInterval: syncData.refreshInterval,
@@ -633,14 +647,49 @@ async function handleExport() {
             enableAi: syncData.enableAi,
             dataSource: syncData.dataSource,
             cronJobs: syncData.cronJobs || [],
+            aiMaxToolIterations: syncData.aiMaxToolIterations,
+            ...(sensitive ? {
+                apiKey: syncData.apiKey,
+                aiProviders: syncData.aiProviders || [],
+                aiActiveProviderId: syncData.aiActiveProviderId || '',
+            } : {}),
         },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
-    a.download = `thswc_full_backup_${comboTimestamp()}.json`;
+    a.download = `thswc_full_backup_${sensitive ? 'sensitive_' : ''}${comboTimestamp()}.json`;
     a.href = URL.createObjectURL(blob);
     a.click();
     URL.revokeObjectURL(a.href);
+}
+
+// AI 对话脱敏：任何导出（含敏感导出）都不携带 base64 原始图片数据。
+// - 上传的图片/文件在消息中已含「[用户上传图片/文件：<文件名>，...]」文本占位，保留之；
+// - 剪贴板粘贴图片只存 dataURL、无文件名，统一替换为「[用户上传图片：粘贴图片]」；
+// - 仅处理副本，不改动存储中的会话。
+function sanitizeAiChats(sessions) {
+    if (!sessions || typeof sessions !== 'object') return sessions;
+    const clone = {};
+    for (const [id, s] of Object.entries(sessions)) {
+        const messages = Array.isArray(s.messages)
+            ? s.messages.map(m => {
+                if (!Array.isArray(m.content) || !m.content.some(p => p && p.type === 'image_url')) return { ...m };
+                return { ...m, content: sanitizeMessageContent(m.content) };
+            })
+            : s.messages;
+        clone[id] = { ...s, messages };
+    }
+    return clone;
+}
+
+// 单条消息内容脱敏：去掉全部 image_url（base64）部分，只保留文本部分；
+// 上传图片已有「用户上传图片：<名>」占位文本则直接保留；粘贴图片补充统一占位符
+function sanitizeMessageContent(content) {
+    const textParts = content.filter(p => p && p.type === 'text');
+    const hasImgPlaceholder = textParts.some(p => /用户上传图片/.test(p.text));
+    if (hasImgPlaceholder) return textParts;
+    const placeholder = { type: 'text', text: '[用户上传图片：粘贴图片]' };
+    return textParts.length ? [...textParts, placeholder] : [placeholder];
 }
 
 // 全量导入：导入插件全部数据和配置（覆盖当前数据）
@@ -656,7 +705,9 @@ async function handleImport(file) {
     if (data.type !== 'full-backup') {
         if (!confirm('该文件不是全量备份格式，可能无法完整恢复。确定继续导入？')) return;
     }
-    if (!confirm('导入将覆盖当前全部数据（所有组合、要点、事件、设置），确定继续？')) return;
+    let importPrompt = '导入将覆盖当前全部数据（所有组合、要点、事件、设置、AI 对话与记忆）';
+    if (data.sensitive === false) importPrompt += '。该备份不含 API Key，导入后小石 / AI 接口的 Key 将保持现状';
+    if (!confirm(importPrompt + '，确定继续？')) return;
 
     // 恢复 local 数据
     if (data.local && typeof data.local === 'object') {
@@ -667,6 +718,8 @@ async function handleImport(file) {
         if (typeof data.local.currentView === 'string') localSet.currentView = data.local.currentView;
         if (Array.isArray(data.local.keyPoints)) localSet.keyPoints = data.local.keyPoints;
         if (Array.isArray(data.local.events)) localSet.events = data.local.events;
+        if (data.local.aiChats && typeof data.local.aiChats === 'object') localSet.aiChats = data.local.aiChats;
+        if (data.local.aiMemory && typeof data.local.aiMemory === 'object') localSet.aiMemory = data.local.aiMemory;
         if (Object.keys(localSet).length) {
             await new Promise(r => chrome.storage.local.set(localSet, r));
         }
@@ -688,6 +741,11 @@ async function handleImport(file) {
         if (typeof data.sync.enableAi === 'boolean') syncSet.enableAi = data.sync.enableAi;
         if (['refresh', 'xiaoshi', 'adata'].includes(data.sync.dataSource)) syncSet.dataSource = data.sync.dataSource;
         if (Array.isArray(data.sync.cronJobs)) syncSet.cronJobs = data.sync.cronJobs;
+        if (typeof data.sync.aiMaxToolIterations === 'number') syncSet.aiMaxToolIterations = Math.min(50, Math.max(1, data.sync.aiMaxToolIterations));
+        // 敏感数据（仅敏感备份含）：小石 Key / AI 接口配置
+        if (typeof data.sync.apiKey === 'string') syncSet.apiKey = data.sync.apiKey;
+        if (Array.isArray(data.sync.aiProviders)) syncSet.aiProviders = data.sync.aiProviders;
+        if (typeof data.sync.aiActiveProviderId === 'string') syncSet.aiActiveProviderId = data.sync.aiActiveProviderId;
         if (Object.keys(syncSet).length) {
             await new Promise(r => chrome.storage.sync.set(syncSet, r));
         }
@@ -1062,7 +1120,16 @@ alertDimImportBtnEl.addEventListener('click', () => switchAlertDim(false));
 viewListBtnEl.addEventListener('click', () => switchView('list'));
 viewTrashBtnEl.addEventListener('click', () => switchView('trash'));
 
-exportBtnEl.addEventListener('click', handleExport);
+exportBtnEl.addEventListener('click', () => exportChoiceOverlayEl.style.display = 'flex');
+closeExportChoiceBtnEl.addEventListener('click', () => exportChoiceOverlayEl.style.display = 'none');
+exportDefaultBtnEl.addEventListener('click', () => {
+    exportChoiceOverlayEl.style.display = 'none';
+    handleExport(false);
+});
+exportSensitiveBtnEl.addEventListener('click', () => {
+    exportChoiceOverlayEl.style.display = 'none';
+    handleExport(true);
+});
 importBtnEl.addEventListener('click', () => importFileInputEl.click());
 importFileInputEl.addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -1396,7 +1463,7 @@ dataSourceSelectEl.addEventListener('change', () => {
     updateApiKeyGroupVisibility();
 });
 
-// API Key：即改即存（Key 仅存本地，不随导出备份）
+// API Key：即改即存（Key 仅存本地，仅在「导出包含 API Key 的敏感数据」时随备份导出）
 apiKeyInputEl.addEventListener('change', () => {
     chrome.storage.sync.set({ apiKey: apiKeyInputEl.value.trim() });
 });
@@ -1412,9 +1479,35 @@ enableAiToggleEl.addEventListener('change', () => {
 });
 
 // AI 窗口切换组合时，弹窗实时跟随（不写回 storage 避免循环）
+// 从 storage 重新加载组合数据（AI 工具等外部写入后同步内存，避免旧快照被后续写操作覆盖）
+function reloadPortfoliosFromStorage() {
+    chrome.storage.local.get(['portfolios', 'stockList', 'activePortfolio'], (r) => {
+        if (!r.portfolios || typeof r.portfolios !== 'object') return;
+        portfolios = r.portfolios;
+        if (r.activePortfolio) activePortfolio = r.activePortfolio;
+        if (portfolios[activePortfolio]) {
+            stockList = portfolios[activePortfolio].stockList || [];
+            selectorName = portfolios[activePortfolio].selectorName || selectorName;
+        } else {
+            stockList = r.stockList || [];
+        }
+        // 保留当前分页/排序/编辑状态，仅重渲染列表与组合
+        renderStockList();
+        refreshCombos();
+        requestResizePopup();
+    });
+}
+
 chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.activePortfolio) {
-        syncPortfolioFromStorage(changes.activePortfolio.newValue);
+    if (area === 'local') {
+        if (changes.activePortfolio) {
+            syncPortfolioFromStorage(changes.activePortfolio.newValue);
+        }
+        // AI 工具写入要点/事件后同步弹窗（自身写入的 keyPoints/events 也会触发，重渲染幂等无害）
+        if (changes.keyPoints) loadKeyPoints();
+        if (changes.events) loadEvents();
+        // AI 工具增删/移动股票后同步组合数据，避免旧内存快照在后续写操作时覆盖 storage
+        if (changes.portfolios || changes.stockList) reloadPortfoliosFromStorage();
     }
 });
 

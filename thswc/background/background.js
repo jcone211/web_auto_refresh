@@ -496,13 +496,16 @@ function openAiChatWindow() {
 
 function createAiChatWindow() {
     chrome.windows.getCurrent((currentWindow) => {
+        // 靠在插件主窗口左侧（预留 8px 间距），顶部与主窗口对齐
+        const baseLeft = currentWindow ? currentWindow.left : 0;
+        const baseTop = currentWindow ? currentWindow.top : 0;
         chrome.windows.create({
             url: chrome.runtime.getURL('ai/ai.html'),
             type: 'popup',
             width: 480,
             height: 700,
-            left: (currentWindow ? currentWindow.width : 1440) - 520,
-            top: 50
+            left: Math.max(baseLeft - 480 - 8, 0),
+            top: Math.max(baseTop, 0)
         }, (newWindow) => {
             if (newWindow && newWindow.id) {
                 chrome.storage.local.set({ aiWindowId: newWindow.id });

@@ -151,6 +151,44 @@ body.ai-body {
     position: relative; /* 悬浮「滚动到底部」按钮的定位基准 */
 }
 
+/* ---------------- 滚动条统一美化（消息流 / 表格 / 代码块 / 工具结果） ----------------
+   WebKit 滚动条：窄轨道 + 圆角滑块，hover 加深；横向（表格/代码块）同样生效 */
+.messages::-webkit-scrollbar,
+.msg table::-webkit-scrollbar,
+.msg pre::-webkit-scrollbar,
+.tool-result::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.messages::-webkit-scrollbar-track,
+.msg table::-webkit-scrollbar-track,
+.msg pre::-webkit-scrollbar-track,
+.tool-result::-webkit-scrollbar-track {
+    background: transparent;
+}
+.messages::-webkit-scrollbar-thumb,
+.msg table::-webkit-scrollbar-thumb,
+.msg pre::-webkit-scrollbar-thumb,
+.tool-result::-webkit-scrollbar-thumb {
+    background: #c8cdd4;
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+.messages::-webkit-scrollbar-thumb:hover,
+.msg table::-webkit-scrollbar-thumb:hover,
+.msg pre::-webkit-scrollbar-thumb:hover,
+.tool-result::-webkit-scrollbar-thumb:hover {
+    background: #a8aeb8;
+    background-clip: content-box;
+}
+.messages::-webkit-scrollbar-corner,
+.msg table::-webkit-scrollbar-corner,
+.msg pre::-webkit-scrollbar-corner,
+.tool-result::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
 /* 悬浮「滚动到底部」按钮：仅在未处于底部时显示 */
 .scroll-down-btn {
     position: absolute;
@@ -232,7 +270,119 @@ body.ai-body {
     align-self: flex-start;
     background: #f1f3f5;
     color: #333;
-    white-space: pre-wrap; /* 保留换行；渲染一律 textContent，防 XSS */
+    /* Markdown 渲染：块级元素由 mdToHtml 生成，无需 pre-wrap（代码块由 pre 保持换行） */
+}
+
+/* ---------------- Markdown 块级元素（AI 回复安全渲染） ---------------- */
+.msg p {
+    margin: 2px 0;
+}
+.msg p:first-child {
+    margin-top: 0;
+}
+.msg p:last-child {
+    margin-bottom: 0;
+}
+.msg h1, .msg h2, .msg h3, .msg h4 {
+    margin: 8px 0 4px;
+    font-weight: bold;
+    line-height: 1.3;
+}
+.msg h1 { font-size: 16px; }
+.msg h2 { font-size: 15px; }
+.msg h3 { font-size: 14px; }
+.msg h4 { font-size: 13px; }
+.msg ul, .msg ol {
+    margin: 4px 0;
+    padding-left: 20px;
+}
+.msg li {
+    margin: 2px 0;
+}
+.msg hr {
+    border: none;
+    border-top: 1px solid #d5d8dc;
+    margin: 8px 0;
+}
+.msg blockquote {
+    margin: 6px 0;
+    padding: 2px 10px;
+    border-left: 3px solid #90caf9;
+    color: #555;
+    background: rgba(33, 150, 243, 0.06);
+    border-radius: 0 4px 4px 0;
+}
+.msg code {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    background: rgba(0, 0, 0, 0.07);
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+.msg pre {
+    margin: 6px 0;
+    padding: 8px 10px;
+    background: #282c34;
+    color: #e6e6e6;
+    border-radius: 6px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.msg pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+    font-size: 12px;
+}
+.msg a {
+    color: #2196f3;
+    text-decoration: none;
+    word-break: break-all;
+}
+.msg a:hover {
+    text-decoration: underline;
+}
+.msg-user a {
+    color: #fff;
+    text-decoration: underline;
+}
+.msg-user code {
+    background: rgba(255, 255, 255, 0.22);
+}
+.msg-user blockquote {
+    border-left-color: rgba(255, 255, 255, 0.5);
+    color: #eef;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Markdown 表格：宽度自适应内容，超出气泡时横向滚动（max-content + 容器 overflow-x） */
+.msg table {
+    border-collapse: collapse;
+    margin: 6px 0;
+    font-size: 12px;
+    width: max-content;
+    max-width: 100%;
+    display: block;
+    overflow-x: auto;
+    padding-bottom: 4px; /* 给横向滚动条留出呼吸空间，不贴表格边框 */
+}
+.msg table thead th {
+    background: rgba(33, 150, 243, 0.12);
+    font-weight: bold;
+    white-space: nowrap;
+}
+.msg th, .msg td {
+    border: 1px solid #d5d8dc;
+    padding: 3px 8px;
+    text-align: right;
+    white-space: nowrap;
+}
+.msg th:first-child, .msg td:first-child {
+    text-align: left;
+}
+.msg table tbody tr:nth-child(even) {
+    background: rgba(0, 0, 0, 0.03);
 }
 
 .msg-error {
@@ -342,6 +492,36 @@ body.ai-body {
 
 .paste-previews[hidden] {
     display: none;
+}
+
+/* 新对话快捷意图气泡：输入内容后点击直接执行 */
+.intent-bubbles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 2px 8px;
+}
+
+.intent-bubbles[hidden] {
+    display: none;
+}
+
+.intent-bubble {
+    padding: 3px 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #2196f3;
+    background: #fff;
+    border: 1px solid #90caf9;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+.intent-bubble:hover {
+    color: #fff;
+    background: #2196f3;
+    border-color: #2196f3;
 }
 
 .paste-preview {
