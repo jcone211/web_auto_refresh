@@ -16,7 +16,7 @@ const DEBUG = true;
 const dbg = (...args) => { if (DEBUG) console.log('[thswc:ai]', ...args); };
 
 // ---------------- 常量 ----------------
-const MAX_TOOL_ITERATIONS = 8;      // 单次提问最多工具往返轮数
+const DEFAULT_MAX_TOOL_ITERATIONS = 18; // 工具调用轮数上限默认值（设置中可配 1-50）
 const MAX_MESSAGES = 100;           // 单会话历史上限
 const MAX_MESSAGE_CHARS = 10000;    // 单条消息存储截断
 const MAX_MEMORY_ITEMS = 50;        // 长期记忆条目上限
@@ -36,10 +36,12 @@ let memoryItems = [];          // 长期记忆 [{ id, content, ts }]
 let workspaceHandles = [];     // 已授权工作目录 [{ name, handle }]，主目录在首位
 let providers = [];            // 接口配置 [{ id, name, baseUrl, apiKey, model }]
 let activeProviderId = '';     // 当前生效的接口配置 id
+let maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS; // 单次提问最多工具往返轮数（设置可配）
 let generating = false;
 let currentRequestId = 0;
 let lastRequestSnapshot = null; // 最近一次失败请求快照 { messages }（重试按钮用）
 let pendingImages = []; // 粘贴待发送图片：[{ dataUrl, file, name }]
+let lastFailUi = null; // 失败渲染清理快照：{ errorEl, actionWrap, failEntry }（重试时移除）
 
 // ---------------- DOM 引用 ----------------
 const messagesEl = document.getElementById('messagesEl');
@@ -66,10 +68,16 @@ const aiProviderNameInput = document.getElementById('aiProviderName');
 const aiBaseUrlInput = document.getElementById('aiBaseUrl');
 const aiApiKeyInput = document.getElementById('aiApiKey');
 const aiModelInput = document.getElementById('aiModel');
+const aiMaxToolIterationsInput = document.getElementById('aiMaxToolIterations');
 
 // ---------------- 工具 ----------------
 const storageGet = (area, keys) => new Promise(resolve => area.get(keys, resolve));
 const storageSet = (area, obj) => new Promise(resolve => area.set(obj, resolve));
+
+// 生成唯一 id（会话消息/图片删除定位用）
+function genUid(prefix) {
+    return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
 
 // 工具定义（OpenAI function schema，全部在页面本地执行）
 const TOOL_DEFS = [
@@ -403,9 +411,17 @@ function defaultProvider(name) {
     return { id: 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: name || '默认', baseUrl: DEFAULT_AI_BASE_URL, apiKey: '', model: DEFAULT_AI_MODEL };
 }
 
+// 工具调用轮数上限：clamp 到 1-50，非法回退默认值
+function clampToolIterations(v) {
+    const n = parseInt(v, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 50) return DEFAULT_MAX_TOOL_ITERATIONS;
+    return n;
+}
+
 // 读取配置：兼容旧版单配置键（aiBaseUrl/aiApiKey/aiModel）迁移
 async function loadProviders() {
-    const res = await storageGet(chrome.storage.sync, ['aiProviders', 'aiActiveProviderId', 'aiBaseUrl', 'aiApiKey', 'aiModel']);
+    const res = await storageGet(chrome.storage.sync, ['aiProviders', 'aiActiveProviderId', 'aiBaseUrl', 'aiApiKey', 'aiModel', 'aiMaxToolIterations']);
+    maxToolIterations = clampToolIterations(res.aiMaxToolIterations);
     if (Array.isArray(res.aiProviders) && res.aiProviders.length > 0) {
         providers = res.aiProviders;
         activeProviderId = providers.some(p => p.id === res.aiActiveProviderId) ? res.aiActiveProviderId : providers[0].id;
@@ -454,6 +470,7 @@ function fillProviderInputs() {
 function openSettings() {
     renderProviderSelect();
     fillProviderInputs();
+    aiMaxToolIterationsInput.value = maxToolIterations;
     aiSettingsOverlay.style.display = 'flex';
 }
 
@@ -502,6 +519,13 @@ function bindProviderEvents() {
     bindInput(aiBaseUrlInput, 'baseUrl');
     bindInput(aiApiKeyInput, 'apiKey');
     bindInput(aiModelInput, 'model');
+    // 工具调用轮数上限：即改即存
+    aiMaxToolIterationsInput.addEventListener('change', () => {
+        const v = clampToolIterations(aiMaxToolIterationsInput.value);
+        aiMaxToolIterationsInput.value = v;
+        maxToolIterations = v;
+        chrome.storage.sync.set({ aiMaxToolIterations: v });
+    });
 }
 
 // ---------------- port 连接 ----------------
@@ -577,7 +601,7 @@ function sendRound(apiMessages, tools, { stream = true } = {}) {
 // initialMessages：可选，指定起始 apiMessages（重试用快照）；默认从会话历史构建
 async function runAgentLoop(initialMessages) {
     const apiMessages = initialMessages || chatMessages.map(m => ({ role: m.role, content: m.content }));
-    for (let round = 0; round < MAX_TOOL_ITERATIONS; round++) {
+    for (let round = 0; round < maxToolIterations; round++) {
         currentAssistantEl = null; // 每轮新建气泡（工具往返后流式内容不能追加到上一轮气泡）
         const requestMessages = [buildSystemPrompt(), ...apiMessages];
         let result = await sendRound(requestMessages, TOOL_DEFS, { stream: true });
@@ -594,10 +618,12 @@ async function runAgentLoop(initialMessages) {
                 result = await sendRound(requestMessages, TOOL_DEFS, { stream: false });
             }
             if (!result.ok) {
-                appendMessage('error', result.error || '请求失败');
+                const errorEl = appendMessage('error', result.error || '请求失败');
                 lastRequestSnapshot = { messages: requestMessages };
-                appendActionButton('重试', retryLast);
-                commitAssistant(result.content);
+                const actionWrap = appendActionButton('重试', retryLast);
+                const failEntry = commitAssistant(result.content);
+                // 记录失败渲染元素与已提交的半截回复，重试时自动清理
+                lastFailUi = { errorEl, actionWrap, failEntry };
                 return;
             }
         }
@@ -615,7 +641,7 @@ async function runAgentLoop(initialMessages) {
             continue;
         }
         // 无工具调用：最终回复落库（commitAssistant 仅供停止/失败路径使用，此处直接入列）
-        chatMessages.push({ role: 'assistant', content: result.content, ts: Date.now() });
+        chatMessages.push({ role: 'assistant', content: result.content, ts: Date.now(), uid: genUid('m') });
         trimChat();
         saveChat();
         if (result.finish_reason === 'length') {
@@ -624,15 +650,17 @@ async function runAgentLoop(initialMessages) {
         return;
     }
     // 超过最大工具轮数：当前内容作为最终回复（避免无限循环）
-    appendMessage('system', '工具调用轮数已达上限，已结束本轮');
+    appendMessage('system', '工具调用轮数已达上限（' + maxToolIterations + '），已结束本轮');
 }
 
-// 把已渲染的部分内容写入会话历史（停止/失败路径）
+// 把已渲染的部分内容写入会话历史（停止/失败路径）；返回条目供重试清理定位
 function commitAssistant(content) {
-    if (!content) return;
-    chatMessages.push({ role: 'assistant', content, ts: Date.now() });
+    if (!content) return null;
+    const entry = { role: 'assistant', content, ts: Date.now(), uid: genUid('m') };
+    chatMessages.push(entry);
     trimChat();
     saveChat();
+    return entry;
 }
 
 // 执行一批工具调用（页面本地），返回 OpenAI 规范的 tool 消息数组；渲染折叠条目
@@ -697,8 +725,9 @@ scrollDownBtn.addEventListener('click', () => {
 });
 
 // 消息一律 textContent 渲染（防 XSS）；content 可为多模态数组
-// [{type:'text',text} , {type:'image_url',image_url:{url}}]，图片渲染为缩略图
-function appendMessage(role, content) {
+// [{type:'text',text} , {type:'image_url',image_url:{url}}]，图片渲染为缩略图。
+// entry 传入会话历史条目时（user/assistant）附带悬停删除按钮，点击从历史与 DOM 移除该条
+function appendMessage(role, content, entry) {
     const el = document.createElement('div');
     el.className = 'msg msg-' + role;
     if (Array.isArray(content)) {
@@ -720,6 +749,22 @@ function appendMessage(role, content) {
         }
     } else {
         el.textContent = content ?? '';
+    }
+    // 可删除消息：user / assistant 且持历史条目
+    if (entry && entry.uid && (role === 'user' || role === 'assistant')) {
+        el.dataset.uid = entry.uid;
+        const del = document.createElement('span');
+        del.className = 'msg-del';
+        del.textContent = '×';
+        del.title = '删除该条消息（从对话历史移除）';
+        del.addEventListener('click', () => {
+            const before = chatMessages.length;
+            chatMessages = chatMessages.filter(m => m.uid !== entry.uid);
+            if (chatMessages.length === before) return;
+            el.remove();
+            saveChat();
+        });
+        el.appendChild(del);
     }
     messagesEl.appendChild(el);
     maybeScroll();
@@ -762,7 +807,7 @@ function renderToolEntry(name, argsJson, resultText) {
     return el;
 }
 
-// 消息流末尾的操作按钮（重试 / 继续生成）
+// 消息流末尾的操作按钮（重试 / 继续生成）；返回容器（重试清理时需移除整组）
 function appendActionButton(label, onClick) {
     const wrap = document.createElement('div');
     wrap.className = 'msg-actions';
@@ -774,13 +819,15 @@ function appendActionButton(label, onClick) {
     wrap.appendChild(btn);
     messagesEl.appendChild(wrap);
     maybeScroll();
-    return btn;
+    return wrap;
 }
 
 function renderHistory() {
     messagesEl.innerHTML = '';
+    // 历史消息补 uid（旧数据/加载的会话无 uid，删除定位依赖它）
+    chatMessages.forEach(m => { if (!m.uid) m.uid = genUid('m'); });
     for (const m of chatMessages) {
-        appendMessage(m.role === 'user' ? 'user' : 'assistant', m.content || '');
+        appendMessage(m.role === 'user' ? 'user' : 'assistant', m.content || '', m);
     }
     // 切换会话后重置跟随状态与悬浮按钮
     followStream = true;
@@ -940,7 +987,7 @@ async function handleUploadFiles(files) {
     }
     if (parts.length === 0) return;
     await ensureChat();
-    chatMessages.push({ role: 'user', content: parts, ts: Date.now() });
+    chatMessages.push({ role: 'user', content: parts, ts: Date.now(), uid: genUid('m') });
     trimChat();
     saveChat();
     appendMessage('user', parts);
@@ -1078,7 +1125,7 @@ async function handleSend() {
         content = parts;
     }
     appendMessage('user', content);
-    chatMessages.push({ role: 'user', content, ts: Date.now() });
+    chatMessages.push({ role: 'user', content, ts: Date.now(), uid: genUid('m') });
     trimChat();
     saveChat();
     chatInput.value = '';
@@ -1108,6 +1155,17 @@ function stopGeneration() {
 
 async function retryLast() {
     if (generating || !lastRequestSnapshot) return;
+    // 自动清理上次失败渲染：报错气泡 + 重试按钮 + 已提交的半截回复（避免残留叠加）
+    if (lastFailUi) {
+        if (lastFailUi.errorEl) lastFailUi.errorEl.remove();
+        if (lastFailUi.actionWrap) lastFailUi.actionWrap.remove();
+        if (lastFailUi.failEntry) {
+            const i = chatMessages.indexOf(lastFailUi.failEntry);
+            if (i !== -1) chatMessages.splice(i, 1);
+        }
+        lastFailUi = null;
+        saveChat();
+    }
     currentAssistantEl = null;
     setGenerating(true);
     try {
@@ -1122,7 +1180,7 @@ async function retryLast() {
 
 async function continueGeneration() {
     if (generating) return;
-    chatMessages.push({ role: 'user', content: '请继续', ts: Date.now() });
+    chatMessages.push({ role: 'user', content: '请继续', ts: Date.now(), uid: genUid('m') });
     trimChat();
     saveChat();
     appendMessage('user', '请继续');

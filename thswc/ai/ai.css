@@ -183,6 +183,33 @@ body.ai-body {
     border-radius: 8px;
     line-height: 1.55;
     word-break: break-word;
+    position: relative; /* 悬停删除按钮的定位基准 */
+}
+
+/* 消息悬停显示删除按钮（仅 user/assistant 渲染该按钮） */
+.msg-del {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.35);
+    color: #fff;
+    font-size: 12px;
+    line-height: 18px;
+    text-align: center;
+    cursor: pointer;
+    display: none;
+    z-index: 2;
+}
+
+.msg:hover .msg-del {
+    display: block;
+}
+
+.msg-del:hover {
+    background: rgba(0, 0, 0, 0.6);
 }
 
 .msg-user {
