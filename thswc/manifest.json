@@ -5,6 +5,7 @@
   "description": "同花顺问财数据监听",
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "windows",
     "alarms",
     "notifications",
@@ -16,7 +17,9 @@
     "*://*.xueqiu.com/*",
     "https://api.shizixi.com/*",
     "https://hq.sinajs.cn/*",
-    "https://qt.gtimg.cn/*"
+    "https://qt.gtimg.cn/*",
+    "https://*/*",
+    "http://*/*"
   ],
   "action": {
     "default_icon": {

@@ -1137,6 +1137,77 @@ button:disabled {
   margin-right: 6px;
 }
 
+/* AI 分析入口置于工具栏行尾，绿边框与「+」按钮一致；padding/margin 紧凑 */
+#openAiChatBtn {
+  margin-left: 4px;
+}
+
+.ai-chat-btn {
+  display: inline-flex;
+  align-items: center;
+  color: #2196f3; /* AI 分析图标浅蓝色 */
+  background: #fff;
+  border: 1px solid #d5d8dc; /* 灰色边框 */
+  padding: 0 6px;
+}
+
+.ai-chat-btn span {
+  color: #333; /* 文字黑色 */
+}
+
+.ai-chat-btn:hover {
+  background: #f5f7fa;
+}
+
+.ai-chat-btn .ic {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  margin-right: 3px;
+}
+
+/* 监控启停单按钮：灰色边框；未运行绿色，运行中红色；文字黑色 */
+.start-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  color: #4caf50; /* ▶ 图标 绿色 */
+  background: #fff;
+  border: 1px solid #d5d8dc; /* 灰色边框 */
+  padding: 0 6px; /* 左右内边距紧凑 */
+  margin-left: 2px;
+}
+
+.start-stop-btn .ic {
+  width: 14px;
+  height: 14px;
+  margin-right: 3px;
+}
+
+/* 文字恒为黑色（图标颜色由按钮 color 控制） */
+.start-stop-btn .btn-label {
+  color: #333;
+}
+
+.start-stop-btn:hover {
+  background: #f5f7fa;
+}
+
+.start-stop-btn .ic-stop {
+  display: none;
+}
+
+.start-stop-btn.running {
+  color: #e53935; /* ■ 图标 红色（边框保持灰色） */
+}
+
+.start-stop-btn.running .ic-play {
+  display: none;
+}
+
+.start-stop-btn.running .ic-stop {
+  display: inline-block;
+}
+
 /* 要点管理弹窗 */
 .keypoints-model {
   position: fixed;

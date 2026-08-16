@@ -50,10 +50,25 @@
                         alt="要点管理" class="doc-icon"></div>
                 <div class="tool-btn doc-icon-btn" id="openSettingsBtn" title="全局设置"><img src="icons/settings.svg"
                         alt="全局设置" class="doc-icon"></div>
-                <div class="switch-group">
-                    <button id="startBtn" class="tool-btn active">开始</button>
-                    <button id="stopBtn" class="tool-btn" disabled>停止</button>
-                </div>
+                <!-- 监控启停单按钮：未运行 [▶ 开始监控]（橙），运行中 [■ 停止监控]（红），白底 -->
+                <button id="startStopBtn" class="tool-btn start-stop-btn" title="开始/停止监控">
+                    <svg class="ic ic-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M8 5v14l11-7z" />
+                    </svg>
+                    <svg class="ic ic-stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                    </svg>
+                    <span class="btn-label">开始监控</span>
+                </button>
+                <!-- AI 分析：独立功能入口，置于行尾，白底简约星芒图标 -->
+                <button id="openAiChatBtn" class="tool-btn ai-chat-btn" title="AI 分析">
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 4l1.8 5.2L19 11l-5.2 1.8L12 18l-1.8-5.2L5 11l5.2-1.8z" />
+                        <path d="M19 3v3M17.5 4.5h3" />
+                    </svg>
+                    <span>AI分析</span>
+                </button>
             </div>
         </div>
         <div class="stock-table-container">
@@ -207,12 +222,20 @@
                 </label>
                 <p class="settings-desc">打开插件时自动刷新全部股票数据</p>
             </div>
+            <!-- 启用 AI 分析：置于快速导入开关上方；API 配置在 AI 窗口内编辑，此处仅留开关 -->
+            <div class="settings-item">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="enableAiToggle" checked>
+                    <span class="toggle-label">启用 AI 分析功能</span>
+                </label>
+                <p class="settings-desc">取消勾选后，首页工具栏将不再显示 AI 分析入口</p>
+            </div>
             <div class="settings-item">
                 <label class="settings-toggle">
                     <input type="checkbox" id="enableQuickImportToggle" checked>
-                    <span class="toggle-label">启用快速打开一键导入</span>
+                    <span class="toggle-label">启用一键导入功能</span>
                 </label>
-                <p class="settings-desc">快速打开输入框有内容时显示「一键导入」按钮，可将内容按「快速打开」逻辑建组导入</p>
+                <p class="settings-desc">快速打开输入框有内容时显示「一键导入」按钮</p>
             </div>
             <div class="settings-item">
                 <label class="settings-toggle">
@@ -226,7 +249,7 @@
                     <input type="checkbox" id="enableTrashToggle" checked>
                     <span class="toggle-label">启用垃圾池功能</span>
                 </label>
-                <p class="settings-desc">关闭后隐藏「垃圾池」视图与「加入垃圾池」入口；已入垃圾池的股票暂不可见，重新开启后恢复</p>
+                <p class="settings-desc">关闭后隐藏「垃圾池」视图与「加入垃圾池」入口，已入垃圾池的股票暂不可见</p>
             </div>
             <div class="settings-item">
                 <label class="settings-toggle">

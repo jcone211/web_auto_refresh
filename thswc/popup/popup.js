@@ -55,6 +55,8 @@ let enableQuickImport = true; // 启用快速打开一键导入（默认开启�
 let quickImportInStockWindow = true; // 一键导入在最小化专属窗口打开（默认开启）；关闭则统一普通页面打开
 let dataSource = 'refresh'; // 数据获取方式：'refresh' 刷新页面获取 | 'api' 调用 API 直取（未实现）
 let cronJobs = []; // 定时全量刷新：[{ id, expr, enabled }]，最多 3 个
+let enableAi = true; // 启用 AI 分析功能（默认开启，控制首页 AI 入口显隐）
+let isMonitoring = false; // 监控运行状态（驱动启停单按钮文案）
 
 // 抓取规则（解析在 parsers.js，按域名派发）
 const selectorsEnum = {
@@ -83,11 +85,11 @@ const quickImportComboInputEl = document.getElementById('quickImportComboInput')
 const confirmQuickImportComboBtnEl = document.getElementById('confirmQuickImportComboBtn');
 const lastUpdateTimeEl = document.getElementById('lastUpdateTime');
 const intervalInput = document.getElementById('interval');
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
+const startStopBtn = document.getElementById('startStopBtn');
 const selectorEl = document.getElementById('selectorName');
 const addStockEl = document.getElementById('addStock');
 const refreshAllBtnEl = document.getElementById('refreshAllBtn');
+const openAiChatBtnEl = document.getElementById('openAiChatBtn');
 const overlayEl = document.getElementById('stockEditOverlay');
 const closeBtnEl = overlayEl.querySelector('.close-btn');
 const lastMonitorEl = document.getElementById('lastMonitor');
@@ -166,6 +168,7 @@ const quickImportInStockWindowToggleEl = document.getElementById('quickImportInS
 const dataSourceSelectEl = document.getElementById('dataSourceSelect');
 const apiKeyInputEl = document.getElementById('apiKeyInput');
 const apiKeyGroupEl = document.getElementById('apiKeyGroup');
+const enableAiToggleEl = document.getElementById('enableAiToggle');
 const cronJobListEl = document.getElementById('cronJobList');
 const addCronJobBtnEl = document.getElementById('addCronJobBtn');
 
@@ -598,10 +601,12 @@ function promptComboName(message, prefilled) {
 }
 
 // 全量导出：导出插件全部数据和配置
+// 注：白名单显式枚举——aiProviders/aiActiveProviderId（AI 接口配置，含 Key）与
+// aiChats/aiMemory（AI 会话与记忆）均不在白名单、不随备份导出，勿在下方列表新增敏感键
 async function handleExport() {
     if (!confirm('将导出插件全部数据和配置（所有组合、要点、事件、设置等），确定继续？')) return;
     const localData = await storageGet(chrome.storage.local, ['stockList', 'portfolios', 'activePortfolio', 'currentView', 'keyPoints', 'events']);
-    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio', 'hideKeyPoints', 'enableTrash', 'refreshOnOpen', 'enableQuickImport', 'quickImportInStockWindow', 'dataSource', 'cronJobs']);
+    const syncData = await storageGet(chrome.storage.sync, ['refreshInterval', 'selectorName', 'pageSize', 'autoResizeWindow', 'defaultPortfolio', 'hideKeyPoints', 'enableTrash', 'refreshOnOpen', 'enableQuickImport', 'quickImportInStockWindow', 'enableAi', 'dataSource', 'cronJobs']);
     const payload = {
         version: 2,
         type: 'full-backup',
@@ -625,6 +630,7 @@ async function handleExport() {
             refreshOnOpen: syncData.refreshOnOpen,
             enableQuickImport: syncData.enableQuickImport,
             quickImportInStockWindow: syncData.quickImportInStockWindow,
+            enableAi: syncData.enableAi,
             dataSource: syncData.dataSource,
             cronJobs: syncData.cronJobs || [],
         },
@@ -679,6 +685,7 @@ async function handleImport(file) {
         if (typeof data.sync.refreshOnOpen === 'boolean') syncSet.refreshOnOpen = data.sync.refreshOnOpen;
         if (typeof data.sync.enableQuickImport === 'boolean') syncSet.enableQuickImport = data.sync.enableQuickImport;
         if (typeof data.sync.quickImportInStockWindow === 'boolean') syncSet.quickImportInStockWindow = data.sync.quickImportInStockWindow;
+        if (typeof data.sync.enableAi === 'boolean') syncSet.enableAi = data.sync.enableAi;
         if (['refresh', 'xiaoshi', 'adata'].includes(data.sync.dataSource)) syncSet.dataSource = data.sync.dataSource;
         if (Array.isArray(data.sync.cronJobs)) syncSet.cronJobs = data.sync.cronJobs;
         if (Object.keys(syncSet).length) {
@@ -711,11 +718,13 @@ function closeModal() {
     stockUrlEl.disabled = false;
 }
 
+// 启停单按钮视觉态：未运行 [▶ 开始监控]，运行中 [■ 停止监控]
 function updateStatus(isActive) {
-    startBtn.disabled = isActive;
-    startBtn.classList.toggle('active', !isActive);
-    stopBtn.disabled = !isActive;
-    stopBtn.classList.toggle('active', isActive);
+    isMonitoring = isActive;
+    startStopBtn.classList.toggle('running', isActive);
+    // 图标由 CSS 按 .running 显隐切换，此处仅更新文案（textContent 会覆盖内联 svg，不可用）
+    startStopBtn.querySelector('.btn-label').textContent = isActive ? '停止监控' : '开始监控';
+    startStopBtn.title = isActive ? '停止定时监控' : '开始定时监控';
 }
 
 // ---------------- 事件接线 ----------------
@@ -739,6 +748,11 @@ async function initState() {
             portfolios = response.portfolios || {};
             activePortfolio = response.activePortfolio || '持仓';
             updateStatus(false);
+            // 监控可能在弹窗重开前已在运行（refreshTimer 由浏览器托管）：
+            // 按实际 alarm 存在与否恢复按钮状态，避免显示「开始监控」而实际在跑
+            chrome.alarms.get('refreshTimer', (alarm) => {
+                if (alarm) updateStatus(true);
+            });
             updateViewToggleUI();
             resolve();
         });
@@ -748,15 +762,17 @@ async function initState() {
 // 首次初始化
 initState().then(() => {
     // 加载全局设置（默认组合、自动伸缩、垃圾池开关、打开刷新、一键导入），应用默认组合后再做首次渲染
-    chrome.storage.sync.get(['defaultPortfolio', 'autoResizeWindow', 'hideKeyPoints', 'enableTrash', 'refreshOnOpen', 'enableQuickImport', 'quickImportInStockWindow'], (result) => {
+    chrome.storage.sync.get(['defaultPortfolio', 'autoResizeWindow', 'hideKeyPoints', 'enableTrash', 'refreshOnOpen', 'enableQuickImport', 'quickImportInStockWindow', 'enableAi'], (result) => {
         autoResizeWindow = !!result.autoResizeWindow;
         hideKeyPoints = !!result.hideKeyPoints;
         enableTrash = result.enableTrash !== false; // 默认开启
         refreshOnOpen = result.refreshOnOpen !== false; // 默认开启
         enableQuickImport = result.enableQuickImport !== false; // 默认开启
         quickImportInStockWindow = result.quickImportInStockWindow !== false; // 默认开启
+        enableAi = result.enableAi !== false; // 默认开启
         applyKeyPointsVisibility();
         applyTrashVisibility();
+        applyAiVisibility();
         updateQuickImportVisibility();
         const dp = result.defaultPortfolio || '持仓';
         // 存储的默认组合若已被删除，回退到固定默认「持仓」
@@ -944,7 +960,14 @@ intervalInput.addEventListener('change', () => {
     }
 });
 
-startBtn.addEventListener('click', () => {
+// 启停单按钮：按当前运行状态在开始/停止间切换
+startStopBtn.addEventListener('click', () => {
+    if (isMonitoring) {
+        chrome.runtime.sendMessage({ action: 'stopRefresh' }, (response) => {
+            if (response && response.status === 'stopped') updateStatus(false);
+        });
+        return;
+    }
     let interval = parseInt(intervalInput.value);
     selectorName = selectorEl.value;
     // 空输入/非法值会得到 NaN：NaN < 30 为 false 兜不住，NaN 周期使 alarms.create 静默失败、
@@ -953,12 +976,6 @@ startBtn.addEventListener('click', () => {
     if (!selectorName) { alert('请选择选择器名称'); return; }
     chrome.runtime.sendMessage({ action: 'startRefresh', interval, selectorName }, (response) => {
         if (response && response.status === 'started') updateStatus(true);
-    });
-});
-
-stopBtn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ action: 'stopRefresh' }, (response) => {
-        if (response && response.status === 'stopped') updateStatus(false);
     });
 });
 
@@ -1166,6 +1183,8 @@ function openSettings() {
         updateApiKeyGroupVisibility();
         renderCronJobList();
     });
+    // 启用 AI 分析开关回填（API 配置在 AI 窗口内编辑，此处不涉及）
+    enableAiToggleEl.checked = enableAi;
     settingsOverlayEl.style.display = 'flex';
 }
 
@@ -1380,6 +1399,43 @@ dataSourceSelectEl.addEventListener('change', () => {
 // API Key：即改即存（Key 仅存本地，不随导出备份）
 apiKeyInputEl.addEventListener('change', () => {
     chrome.storage.sync.set({ apiKey: apiKeyInputEl.value.trim() });
+});
+
+// 「启用 AI 分析」开关：控制首页 AI 入口显隐（API 配置在 AI 窗口内编辑）
+function applyAiVisibility() {
+    openAiChatBtnEl.style.display = enableAi ? '' : 'none';
+}
+enableAiToggleEl.addEventListener('change', () => {
+    enableAi = enableAiToggleEl.checked;
+    chrome.storage.sync.set({ enableAi });
+    applyAiVisibility();
+});
+
+// AI 窗口切换组合时，弹窗实时跟随（不写回 storage 避免循环）
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.activePortfolio) {
+        syncPortfolioFromStorage(changes.activePortfolio.newValue);
+    }
+});
+
+// AI 窗口 switch_portfolio 后同步弹窗状态（storage 已由 AI 侧写入，此处只更新内存与 UI；
+// 监控重排的 refresh 消息也已由 AI 侧发出，不重复发送）
+function syncPortfolioFromStorage(name) {
+    if (!name || name === activePortfolio || !portfolios[name]) return;
+    activePortfolio = name;
+    stockList = portfolios[name].stockList || [];
+    selectorName = portfolios[name].selectorName || 'wc1';
+    selectorEl.value = selectorName;
+    currentPage = 1;
+    currentSort = 'default';
+    refreshCombos();
+    renderStockList();
+    requestResizePopup();
+}
+
+// 打开 AI 对话窗口（独立窗口单例，由 background 创建/聚焦）
+openAiChatBtnEl.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ action: 'openAiChat' });
 });
 
 // 一键刷新：全部组合的全部股票（含已停止的），与监控运行状态无关；

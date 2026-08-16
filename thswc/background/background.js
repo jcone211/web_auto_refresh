@@ -2,6 +2,7 @@ import { stripSign, effectiveStockUrl, isKnownMarketPrefix } from '../shared/uti
 import { nextCronTime } from '../shared/cron.js';
 import { batchQuotes } from '../js/xiaoshi_realtime_quote.js';
 import { batchQuotes as adataBatchQuotes } from '../js/adata_realtime_quote.js';
+import { streamAiChat } from '../ai/ai_backend.js';
 
 // 默认组合（不可删除、不可重命名）
 const DEFAULT_PORTFOLIOS = ['默认', '持仓', '观察'];
@@ -33,6 +34,17 @@ chrome.runtime.onConnect.addListener((port) => {
         popupPort = port;
         port.onDisconnect.addListener(() => {
             popupPort = null;
+        });
+    } else if (port.name === 'ai-chat-connection') {
+        // AI 对话窗口：断连时中止该窗口全部在途 LLM 请求，避免浪费 token
+        port.onMessage.addListener((msg) => handleAiChatMessage(port, msg));
+        port.onDisconnect.addListener(() => {
+            for (const [requestId, entry] of aiChatRequests) {
+                if (entry.port === port) {
+                    entry.controller.abort();
+                    aiChatRequests.delete(requestId);
+                }
+            }
         });
     }
 });
@@ -95,13 +107,16 @@ chrome.action.onClicked.addListener(() => {
 
 // 监听窗口关闭：仅当关闭的是插件弹窗时停止监控
 chrome.windows.onRemoved.addListener((closedWindowId) => {
-    chrome.storage.local.get(['popupWindowId', 'stockWindowId'], ({ popupWindowId, stockWindowId }) => {
+    chrome.storage.local.get(['popupWindowId', 'stockWindowId', 'aiWindowId'], ({ popupWindowId, stockWindowId, aiWindowId }) => {
         if (closedWindowId === popupWindowId) {
             chrome.storage.local.set({ popupWindowId: null });
             chrome.alarms.clearAll();
         }
         if (closedWindowId === stockWindowId) {
             chrome.storage.local.set({ stockWindowId: null });
+        }
+        if (closedWindowId === aiWindowId) {
+            chrome.storage.local.set({ aiWindowId: null });
         }
     });
 });
@@ -286,6 +301,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // cron 配置变更（增删/启停/表达式修改）后重排全部一次性 alarm
         scheduleCronAlarms();
         sendResponse({ status: 'ok' });
+    } else if (request.action === 'openAiChat') {
+        // 打开 AI 对话窗口（单例：已存在则聚焦）
+        openAiChatWindow();
+        sendResponse({ status: 'ok' });
     } else if (request.type === 'DOCUMENT_CAPTURED') {
         // 停止监控（无 refreshTimer）后，已打开标签页里的 content script 仍会因
         // 行情页 DOM 实时变动持续上报；此时直接丢弃，不转发 popup，
@@ -454,6 +473,96 @@ function resizePopupWindow(rows) {
             dbg('弹窗调整高度:', newHeight, 'rows=', rows);
         });
     });
+}
+
+// ---------------- AI 对话窗口与流式代理 ----------------
+
+// 打开 AI 对话窗口（单例：已存在则聚焦，否则创建；窗口关闭由 onRemoved 清理登记）
+function openAiChatWindow() {
+    chrome.storage.local.get('aiWindowId', ({ aiWindowId }) => {
+        if (aiWindowId !== null && aiWindowId !== undefined) {
+            chrome.windows.get(aiWindowId, (window) => {
+                if (chrome.runtime.lastError || !window) {
+                    createAiChatWindow();
+                } else {
+                    chrome.windows.update(aiWindowId, { focused: true });
+                }
+            });
+        } else {
+            createAiChatWindow();
+        }
+    });
+}
+
+function createAiChatWindow() {
+    chrome.windows.getCurrent((currentWindow) => {
+        chrome.windows.create({
+            url: chrome.runtime.getURL('ai/ai.html'),
+            type: 'popup',
+            width: 480,
+            height: 700,
+            left: (currentWindow ? currentWindow.width : 1440) - 520,
+            top: 50
+        }, (newWindow) => {
+            if (newWindow && newWindow.id) {
+                chrome.storage.local.set({ aiWindowId: newWindow.id });
+            }
+        });
+    });
+}
+
+// AI 对话流式请求表：requestId -> { controller, port, timeoutFired }
+// 用户停止 / 窗口关闭 / 120s 超时均经 AbortController 中止，页面端收 ABORTED/ERROR 收尾
+const aiChatRequests = new Map();
+const AI_CHAT_TIMEOUT_MS = 120000;
+
+// AI 窗口 port 消息分发：aiChatStream 发起 LLM 流式代理，aiChatStop 中止在途请求
+function handleAiChatMessage(port, msg) {
+    if (msg.action === 'aiChatStream') {
+        const controller = new AbortController();
+        const entry = { controller, port, timeoutFired: false };
+        aiChatRequests.set(msg.requestId, entry);
+        const timer = setTimeout(() => {
+            entry.timeoutFired = true;
+            controller.abort();
+        }, AI_CHAT_TIMEOUT_MS);
+        const post = (payload) => {
+            try { port.postMessage(payload); } catch { /* 窗口已关闭 */ }
+        };
+        streamAiChat({
+            baseUrl: msg.baseUrl,
+            apiKey: msg.apiKey,
+            model: msg.model,
+            messages: msg.messages,
+            tools: msg.tools,
+            stream: msg.stream !== false, // 页面降级非流式时传 false
+            signal: controller.signal,
+        }, (event) => {
+            if (event.type === 'chunk') {
+                post({ type: 'AI_CHAT_CHUNK', requestId: msg.requestId, delta: event.delta });
+            } else if (event.type === 'done') {
+                aiChatRequests.delete(msg.requestId);
+                clearTimeout(timer);
+                post({ type: 'AI_CHAT_DONE', requestId: msg.requestId, finish_reason: event.finish_reason, tool_calls: event.tool_calls });
+            } else if (event.type === 'error') {
+                aiChatRequests.delete(msg.requestId);
+                clearTimeout(timer);
+                post({ type: 'AI_CHAT_ERROR', requestId: msg.requestId, message: event.message, retriable: event.retriable });
+            } else if (event.type === 'aborted') {
+                aiChatRequests.delete(msg.requestId);
+                clearTimeout(timer);
+                // 超时中止与用户停止区分：超时给可重试错误，用户停止给 ABORTED
+                if (entry.timeoutFired) {
+                    post({ type: 'AI_CHAT_ERROR', requestId: msg.requestId, message: '请求超时（120s），请重试', retriable: true });
+                } else {
+                    post({ type: 'AI_CHAT_ABORTED', requestId: msg.requestId });
+                }
+            }
+        });
+    } else if (msg.action === 'aiChatStop') {
+        const entry = aiChatRequests.get(msg.requestId);
+        if (entry) entry.controller.abort();
+    }
 }
 
 // ---------------- cron 定时器（全局设置，最多 3 个） ----------------
