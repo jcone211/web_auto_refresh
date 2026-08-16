@@ -6,7 +6,9 @@
 
 内置 AI 助手（无本地后端，不依赖 Open WebUI / AnythingLLM），通过插件主页工具栏「✨ AI分析」按钮打开独立对话窗口。所有大模型调用直接走 OpenAI 兼容 API（默认 DeepSeek，也支持 OpenAI / 阿里云百炼 Qwen / 本地 Ollama 等任何兼容端点），流式输出。
 
-![AI 对话主界面](../images/README/thswc-ai-chat.png)
+![AI 对话基本使用（1/2）](../images/README/thswc-ai1.png)
+
+![AI 对话基本使用（2/2）](../images/README/thswc-ai2.png)
 
 ### 接口配置（多份手动切换）
 
@@ -160,8 +162,11 @@
 
 ## 界面预览
 
-AI 对话主界面（会话切换 + 工作目录授权）
-![AI 对话主界面](../images/README/thswc-ai-chat.png)
+AI 对话（基本使用 1/2）
+![AI 对话基本使用（1/2）](../images/README/thswc-ai1.png)
+
+AI 对话（基本使用 2/2）
+![AI 对话基本使用（2/2）](../images/README/thswc-ai2.png)
 
 AI 设置（多份接口配置）
 ![AI 设置](../images/README/thswc-ai-settings.png)
