@@ -78,8 +78,17 @@
                 <input type="text" id="aiModel" class="ai-settings-input" placeholder="deepseek-chat">
             </div>
             <div class="ai-settings-item">
+                <label for="aiSupportsVision">
+                    <input type="checkbox" id="aiSupportsVision"> 当前模型支持视觉（图片输入）
+                </label>
+            </div>
+            <div class="ai-settings-item">
                 <label for="aiMaxToolIterations">工具调用轮数上限（1-50）</label>
                 <input type="number" id="aiMaxToolIterations" class="ai-settings-input" min="1" max="50" placeholder="18">
+            </div>
+            <div class="ai-settings-item">
+                <label for="aiDefaultVisionProvider">默认使用的视觉模型</label>
+                <select id="aiDefaultVisionProvider" class="ai-settings-input"></select>
             </div>
             <p class="ai-settings-desc">支持任何 OpenAI 兼容 /v1/chat/completions 端点</p>
         </div>

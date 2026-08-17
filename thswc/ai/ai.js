@@ -38,8 +38,9 @@ let currentChatId = null;      // 当前会话 id
 let chatMessages = [];         // 当前会话消息（仅 user/assistant，不含 tool 过程）
 let memoryItems = [];          // 长期记忆 [{ id, content, ts }]
 let workspaceHandles = [];     // 已授权工作目录 [{ name, handle }]，主目录在首位
-let providers = [];            // 接口配置 [{ id, name, baseUrl, apiKey, model }]
+let providers = [];            // 接口配置 [{ id, name, baseUrl, apiKey, model, supportsVision }]
 let activeProviderId = '';     // 当前生效的接口配置 id
+let defaultVisionProviderId = ''; // 全局默认视觉模型配置 id
 let maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS; // 单次提问最多工具往返轮数（设置可配）
 let generating = false;
 let currentRequestId = 0;
@@ -74,11 +75,15 @@ const aiProviderNameInput = document.getElementById('aiProviderName');
 const aiBaseUrlInput = document.getElementById('aiBaseUrl');
 const aiApiKeyInput = document.getElementById('aiApiKey');
 const aiModelInput = document.getElementById('aiModel');
+const aiSupportsVisionInput = document.getElementById('aiSupportsVision');
 const aiMaxToolIterationsInput = document.getElementById('aiMaxToolIterations');
+const aiDefaultVisionProviderSelect = document.getElementById('aiDefaultVisionProvider');
 
 // ---------------- 工具 ----------------
 const storageGet = (area, keys) => new Promise(resolve => area.get(keys, resolve));
-const storageSet = (area, obj) => new Promise(resolve => area.set(obj, resolve));
+const storageSet = (area, obj) => new Promise(resolve => area.set(obj, () => {
+    resolve();
+}));
 
 // 生成唯一 id（会话消息/图片删除定位用）
 function genUid(prefix) {
@@ -91,12 +96,12 @@ const TOOL_DEFS = [
     { type: 'function', function: { name: 'get_portfolios', description: '读取全部持仓组合结构（各组合名称与股票数量）及当前活动组合', parameters: { type: 'object', properties: {}, required: [] } } },
     { type: 'function', function: { name: 'switch_portfolio', description: '切换当前活动组合（影响插件弹窗显示与定时监控范围），先校验组合是否存在', parameters: { type: 'object', properties: { name: { type: 'string', description: '目标组合名' } }, required: ['name'] } } },
     { type: 'function', function: { name: 'get_key_points', description: '读取交易要点列表（要点内容与权重）', parameters: { type: 'object', properties: {}, required: [] } } },
-    { type: 'function', function: { name: 'get_events', description: '读取事件记录列表（关联要点/内容/日期/状态）', parameters: { type: 'object', properties: {}, required: [] } } },
+    { type: 'function', function: { name: 'get_events', description: '读取事件记录列表（关联要点/内容/日期/状态）。默认只返回未归档事件；仅当用户明确要求查看全部（含已归档）时才传 include_archived=true。返回项中 duplicateDates 列出与该项内容相同但日期不同的其他事件日期，供识别重复事件。若存在超 7 天且状态为准确/误判的未归档事件，会一并自动归档并在 remind 中说明；超 7 天仍为待预测的事件会嘱你在回复中提醒用户修改状态', parameters: { type: 'object', properties: { include_archived: { type: 'boolean', description: '是否返回全部事件（含已归档），缺省 false 仅未归档' } }, required: [] } } },
     { type: 'function', function: { name: 'create_key_point', description: '创建一条交易要点（内容 + 权重 1-99）', parameters: { type: 'object', properties: { text: { type: 'string', description: '要点内容' }, weight: { type: 'number', description: '权重 1-99' } }, required: ['text', 'weight'] } } },
     { type: 'function', function: { name: 'update_key_point', description: '修改要点（按原文定位；改动内容不影响已关联该要点的历史事件）', parameters: { type: 'object', properties: { old_text: { type: 'string', description: '要修改的要点原文' }, text: { type: 'string', description: '新的要点内容' }, weight: { type: 'number', description: '新的权重 1-99' } }, required: ['old_text', 'text', 'weight'] } } },
     { type: 'function', function: { name: 'delete_key_point', description: '删除一条要点（不删除其关联事件）', parameters: { type: 'object', properties: { text: { type: 'string', description: '要删除的要点内容' } }, required: ['text'] } } },
-    { type: 'function', function: { name: 'create_event', description: '创建一条预测事件（关联要点可留空；time 为 YYYY-MM-DD，缺省今天）。若存在超过一周仍未归档的事件会一并提醒用户补充', parameters: { type: 'object', properties: { key_point_text: { type: 'string', description: '关联要点内容，可为空' }, content: { type: 'string', description: '事件内容' }, time: { type: 'string', description: '事件日期 YYYY-MM-DD' } }, required: ['content'] } } },
-    { type: 'function', function: { name: 'update_event', description: '修改事件（按 id；已归档事件不可修改），支持改关联要点/内容/日期/状态', parameters: { type: 'object', properties: { id: { type: 'string', description: '事件 id（用 get_events 查询）' }, key_point_text: { type: 'string', description: '新的关联要点' }, content: { type: 'string', description: '新的事件内容' }, time: { type: 'string', description: '新的事件日期 YYYY-MM-DD' }, status: { type: 'string', description: '新状态：pending 待预测 / accurate 准确 / wrong 误判' } }, required: ['id'] } } },
+    { type: 'function', function: { name: 'create_event', description: '创建一条预测事件。事件内容(content)只填股票名称（如「百通能源」），禁止把分析/预测/操作文字写入 content；判断逻辑、时间与操作应体现为关联要点。关联要点(key_point_text)须优先从 get_key_points 已有的要点中选择（拿不准先用 get_key_points 查看现有要点再对应关联，不要臆造不存在的要点内容），现有要点与意图不完全匹配时才新建要点或留空。time 为 YYYY-MM-DD，缺省今天。若存在超过一周仍未归档的事件会一并提醒用户补充', parameters: { type: 'object', properties: { key_point_text: { type: 'string', description: '关联现有业已存在或本次新建的要点内容，可为空' }, content: { type: 'string', description: '事件内容，仅填股票名称' }, time: { type: 'string', description: '事件日期 YYYY-MM-DD' } }, required: ['content'] } } },
+    { type: 'function', function: { name: 'update_event', description: '修改事件（按 id；已归档事件不可修改），可改关联要点/内容/日期/status（pending 待预测 / accurate 准确 / wrong 误判）。不能设置归档——归档只发生在手动点击或事件超 7 天且状态为准确/误判时自动进行，若刚改状态的事件因此被自动归档，结果会说明。当存在多条内容相同的事件时，默认修改其中 time 最早（最久远）的那条 id，并在回复中简略提醒用户还有其它日期存在相同内容事件', parameters: { type: 'object', properties: { id: { type: 'string', description: '事件 id（用 get_events 查询）' }, key_point_text: { type: 'string', description: '新的关联要点' }, content: { type: 'string', description: '新的事件内容' }, time: { type: 'string', description: '新的事件日期 YYYY-MM-DD' }, status: { type: 'string', description: '新状态：pending 待预测 / accurate 准确 / wrong 误判' } }, required: ['id'] } } },
     { type: 'function', function: { name: 'delete_event', description: '删除一条事件（按 id）', parameters: { type: 'object', properties: { id: { type: 'string', description: '事件 id（用 get_events 查询）' } }, required: ['id'] } } },
     { type: 'function', function: { name: 'add_stock_to_portfolio', description: '按名称向指定组合添加一只股票（组合缺省「持仓」）。自动生成问财搜索页作为监控地址，ETF（159/51/58 开头）走雪球个股页', parameters: { type: 'object', properties: { name: { type: 'string', description: '股票名称' }, portfolio: { type: 'string', description: '目标组合名，缺省「持仓」' } }, required: ['name'] } } },
     { type: 'function', function: { name: 'move_stock_to_combo', description: '把股票从来源组合移动到目标组合（按名称匹配、忽略首尾空格；来源缺省当前活动组合，目标缺省「观察」）。用于记录「卖出」等调仓：卖出时应传 source_portfolio 为实际持有该股的组合（通常「持仓」）；若目标组合已存在同名股票，则仅从来源组合删除、不重复添加', parameters: { type: 'object', properties: { name: { type: 'string', description: '股票名称' }, target_portfolio: { type: 'string', description: '目标组合名，缺省「观察」' }, source_portfolio: { type: 'string', description: '来源组合名（卖出的实际持仓组合），缺省当前活动组合' } }, required: ['name'] } } },
@@ -107,7 +112,7 @@ const TOOL_DEFS = [
     { type: 'function', function: { name: 'list_workspaces', description: '列出已授权的全部工作目录（主目录与附加目录）及其权限状态', parameters: { type: 'object', properties: {}, required: [] } } },
     { type: 'function', function: { name: 'list_dir', description: '列出工作目录（或子目录）内容。root 缺省为主目录，可传附加目录名；软链接条目无法访问（浏览器安全限制）', parameters: { type: 'object', properties: { path: { type: 'string', description: '相对所选目录的路径，空为根目录' }, root: { type: 'string', description: '工作目录名，可用 list_workspaces 查询；缺省为主目录' } }, required: [] } } },
     { type: 'function', function: { name: 'read_parquet', description: '读取工作目录中的 Parquet 数据文件，返回列名、总行数和限定数量的行。适合查询股票日线等 parquet 数据；path 必须是相对授权工作目录的路径，root 缺省为主目录。默认最多返回 100 行，可用 columns 选择列。', parameters: { type: 'object', properties: { path: { type: 'string', description: '相对工作目录的 .parquet 文件路径' }, root: { type: 'string', description: '工作目录名，缺省为主目录' }, columns: { type: 'array', items: { type: 'string' }, description: '要读取的列名；缺省读取全部列' }, row_start: { type: 'integer', minimum: 0, description: '起始行，缺省 0' }, limit: { type: 'integer', minimum: 1, maximum: 500, description: '最多返回行数，缺省 100，最大 500' } }, required: ['path'] } } },
-    { type: 'function', function: { name: 'read_stock_kline', description: '获取股票近 N 天日线 K 线（开/高/低/收/成交量/成交额/涨跌幅）。优先读取工作目录 parquet 缓存（data/a_share_daily/qfq/data_*.parquet，小石量化数据）；当缓存缺少最近交易日数据时自动调用小石量化 API 补齐。支持按股票名称或代码。', parameters: { type: 'object', properties: { name: { type: 'string', description: '股票名称，如「德明利」；与 code 二选一' }, code: { type: 'string', description: '股票代码，如 001309 或 001309.SZ；与 name 二选一' }, days: { type: 'integer', minimum: 1, maximum: 60, description: '近 N 个交易日，缺省 7' }, root: { type: 'string', description: '工作目录名，缺省为主目录（parquet 数据目录的根，如含 data/a_share_daily 的目录）' } }, required: [] } } },
+    { type: 'function', function: { name: 'read_stock_kline', description: '获取股票近 N 天日线 K 线（开/高/低/收/成交量/成交额/涨跌幅）。优先读取工作目录 parquet 缓存（data/a_share_daily/qfq/data_*.parquet，小石量化数据）；当缓存缺少最近交易日数据时自动调用小石量化 API 补齐。支持按股票名称或代码。', parameters: { type: 'object', properties: { name: { type: 'string', description: '股票名称，如「德明利」；与 code 二选一' }, code: { type: 'string', description: '股票代码，如 001309 或 001309.SZ；与 name 二选一' }, days: { type: 'integer', minimum: 1, maximum: 60, description: '近 N 个交易日，缺省 30' }, root: { type: 'string', description: '工作目录名，缺省为主目录（parquet 数据目录的根，如含 data/a_share_daily 的目录）' } }, required: [] } } },
     { type: 'function', function: { name: 'get_stock_quote', description: '获取股票实时行情（最新价/涨跌幅/开盘/最高/最低/成交量/成交额/换手率），不经页面直接调用小石实时行情接口。支持按股票名称或代码。', parameters: { type: 'object', properties: { name: { type: 'string', description: '股票名称，如「德明利」；与 code 二选一' }, code: { type: 'string', description: '股票代码，如 001309 或 001309.SZ；与 name 二选一' } }, required: [] } } },
 
     { type: 'function', function: { name: 'append_file', description: '向工作目录中的文本文件追加内容（不存在则创建）', parameters: { type: 'object', properties: { path: { type: 'string', description: '相对所选目录的文件路径' }, content: { type: 'string', description: '要追加的内容' }, root: { type: 'string', description: '工作目录名，缺省为主目录' } }, required: ['path', 'content'] } } },
@@ -176,19 +181,31 @@ const toolExecutors = {
         const { keyPoints } = await storageGet(chrome.storage.local, 'keyPoints');
         return summarizeList(keyPoints || [], kp => ({ text: kp.text, weight: kp.weight }));
     },
-    async get_events() {
+    async get_events(args) {
         const denied = await requireKeyPoints();
         if (denied) return denied;
         const { events } = await storageGet(chrome.storage.local, 'events');
-        const result = summarizeList(events || [], e => ({
+        const list = events || [];
+        const { remind, archivedCount } = autoArchiveEvents(list);
+        if (archivedCount > 0) await storageSet(chrome.storage.local, { events: list });
+        // 默认只返回未归档事件；用户明确要求查看全部时才返回已归档
+        const includeAll = !!(args && args.include_archived);
+        const target = includeAll ? list : list.filter(e => !e.archived);
+        // 标注内容相同但日期不同的其他事件日期，供识别重复事件
+        const contentDates = new Map();
+        for (const e of target) {
+            if (!contentDates.has(e.content)) contentDates.set(e.content, []);
+            contentDates.get(e.content).push(e.time);
+        }
+        const result = summarizeList(target, e => ({
             id: e.id,
             keyPointText: e.keyPointText || '',
             content: e.content,
             time: e.time,
             status: e.status,
             archived: !!e.archived,
+            duplicateDates: (contentDates.get(e.content) || []).filter(t => t !== e.time),
         }));
-        const remind = staleEventReminder(events);
         if (remind) result.remind = remind;
         return result;
     },
@@ -250,11 +267,11 @@ const toolExecutors = {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(time)) return { error: 'time 需为 YYYY-MM-DD 格式' };
         const { events } = await storageGet(chrome.storage.local, 'events');
         const list = events || [];
+        const { remind } = autoArchiveEvents(list);
         const event = { id: genUid('ev'), keyPointText, content, time, status: 'pending', archived: false };
         list.push(event);
         await storageSet(chrome.storage.local, { events: list });
         const result = { ok: true, event, total: list.length };
-        const remind = staleEventReminder(list);
         if (remind) result.remind = remind;
         return result;
     },
@@ -289,9 +306,11 @@ const toolExecutors = {
             if (!['pending', 'accurate', 'wrong'].includes(args.status)) return { error: 'status 需为 pending / accurate / wrong' };
             ev.status = args.status;
         }
+        // 更新后执行自动归档（改完状态若已超 7 天且为准确/误判，立即归档）
+        const { remind, archivedCount } = autoArchiveEvents(list);
         await storageSet(chrome.storage.local, { events: list });
         const result = { ok: true, event: ev };
-        const remind = staleEventReminder(list);
+        if (archivedCount > 0) result.archivedNow = archivedCount;
         if (remind) result.remind = remind;
         return result;
     },
@@ -448,7 +467,7 @@ const toolExecutors = {
     },
     async read_stock_kline(args) {
         const dir = await readyRoot(workspaceHandles, args && args.root);
-        const days = Math.min(Math.max(parseInt(args && args.days, 10) || 7, 1), 60);
+        const days = Math.min(Math.max(parseInt(args && args.days, 10) || 30, 1), 60);
         // 1) 解析股票代码（支持代码或名称）
         const resolved = await resolveStockCode(args);
         if (resolved.error) return resolved;
@@ -684,13 +703,34 @@ function todayStr() {
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 }
 
-// 查找超过一周仍未归档的事件，返回提醒文案（无则 null），供事件类工具结果附带
-function staleEventReminder(events) {
+// 对超期未归档事件执行自动归档并生成提醒文案。会就地修改传入的 events：
+// - 超 7 天且状态为准确/误判 → 自动置为 archived
+// - 超 7 天仍为待预测 → 提醒用户确认验证结果并修改状态
+// 返回 { remind（提醒文案，无则 null）, archivedCount（本次自动归档条数） }
+function autoArchiveEvents(events) {
     const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
-    const stale = (events || []).filter(e => !e.archived && e.time && new Date(e.time).getTime() < weekAgo);
-    if (stale.length === 0) return null;
-    const names = stale.map(e => `「${e.content}」（${e.time}，${eventStatusLabel(e.status)}）`).join('；');
-    return '以下事件已超过一周仍未归档，请提醒用户补充验证结果并归档：' + names;
+    const archivedNow = [];
+    const pendingStale = [];
+    for (const e of events || []) {
+        if (e.archived) continue;
+        if (!e.time || new Date(e.time).getTime() >= weekAgo) continue;
+        if (e.status === 'accurate' || e.status === 'wrong') {
+            e.archived = true;
+            archivedNow.push(e);
+        } else if (e.status === 'pending') {
+            pendingStale.push(e);
+        }
+    }
+    const parts = [];
+    if (archivedNow.length) {
+        parts.push('以下事件已超 7 天且状态为准确/误判，已自动归档：' +
+            archivedNow.map(e => `「${e.content}」（${e.time}，${eventStatusLabel(e.status)}）`).join('；'));
+    }
+    if (pendingStale.length) {
+        parts.push('以下事件已超过一周仍未归档且状态为待预测，请提醒用户确认验证结果并修改状态：' +
+            pendingStale.map(e => `「${e.content}」（${e.time}）`).join('；'));
+    }
+    return { remind: parts.length ? parts.join('。') : null, archivedCount: archivedNow.length };
 }
 
 function eventStatusLabel(s) {
@@ -741,12 +781,24 @@ async function addMemory(content) {
 // 系统提示词：每轮组装，记忆新写入后下一轮立即生效
 function buildSystemPrompt() {
     const lines = [
-        '你是「同花顺问财」Chrome 扩展的 AI 助手。可用工具：查看/切换持仓组合、读取股票行情、创建/修改/删除要点与事件、读写设置；读写用户授权的工作目录文件（主目录 + 附加目录，root 参数用目录名寻址；软链接不可访问，需授权真实目录为附加根），若设置了项目主目录，可尝试访问CLAUDE.md、.claude文件夹、.claude/skills等文件；也可以用 read_parquet 读取授权工作目录中的 .parquet 股票数据，该工具会返回列名、总行数和限定行数据，优先传 columns、row_start、limit 控制结果大小；通过 save_memory 记住用户偏好。要点/事件工具需要全局设置开启「启用要点管理功能」，未开启时工具会返回提示，此时应引导用户先在插件全局设置开启；若工具返回「事件超过一周未归档」的提醒，请向用户转达并建议补充验证结果、归档。回答使用中文。',
+        '你是「同花顺问财」Chrome 扩展的 AI 助手。可用工具：查看/切换持仓组合、读取股票行情、创建/修改/删除要点与事件、读写设置；读写用户授权的工作目录文件（主目录 + 附加目录，root 参数用目录名寻址；软链接不可访问，需授权真实目录为附加根），若设置了项目主目录，可尝试访问CLAUDE.md、.claude文件夹、.claude/skills等文件；也可以用 read_parquet 读取授权工作目录中的 .parquet 股票数据，该工具会返回列名、总行数和限定行数据，优先传 columns、row_start、limit 控制结果大小；通过 save_memory 记住用户偏好。要点/事件工具需要全局设置开启「启用要点管理功能」，未开启时工具会返回提示，此时应引导用户先在插件全局设置开启；事件归档不归你执行——系统会在事件超 7 天且状态为准确/误判时自动归档（结果会包含说明）；若工具返回「待预测超期」的提醒，请向用户转达并建议确认验证结果后把状态改为准确或误判；get_events 默认只返回未归档事件，用户明确要求查看全部时才传 include_archived=true。回答使用中文。',
         '',
         '股票最新行情数据获取规范：',
         '- 需要某只股票近 N 天日线（股价/成交量）时，直接用 read_stock_kline 工具，传股票名称或代码即可；该工具自动读取工作目录 parquet 缓存（data/a_share_daily/qfq/data_*.parquet），若缓存缺最近交易日数据会依次调用小石量化 API、东方财富 adata 接口补齐，无需手动拼接路径。',
+        '- 用户说「分析某支股票」「看看某股」而未指定天数时，默认取近 30 个交易日（read_stock_kline days 缺省即 30）；仅在用户明确要求更多/更少天数时才改。',
         '- 需要某只股票实时行情（最新价/涨跌幅）时，用 get_stock_quote 工具。',
         '- 小石/东方财富数据拉取能力已直接封装在扩展内（无需读取任何 skill 文件即可调用）；若工作目录中可访问 .claude/skills/xiaoshi-quant-expert，仅当涉及更深层的量化/回测接口时可按需阅读其中的 references/api.md 作参考。',
+        '',
+        '创建事件规范：create_event 的内容(content)只写股票名称，不要把分析、预测目标价、操作指令等文字塞进 content；时间与操作逻辑以「要点」承载。创建事件前先调 get_key_points 查看现有要点，优先把事件关联到语义匹配的既有要点（如「收盘前，B且连续三天缩量下跌，买入」这类含时间与操作的要点），不要另起大段分析当事件内容。',
+        '修改事件规范：用 update_event 为用户改状态/内容/日期/关联要点；若要修改的事件存在多条相同内容，默认改 time 最早（最久远）的那条，并在回复中简略提醒用户还有 xx 日的相同内容事件；事件归档不通过 update_event 设置，改完状态后若满足自动归档条件系统会自动归档。',
+        '',
+        '成交量柱状图展示规范：',
+        '- 分析 K 线/成交量的回复中，如适合可视化，可在正文末尾输出一段 stockchart 代码围栏，扩展会自动渲染为红涨绿跌的成交量柱状图：',
+        '  ```stockchart',
+        '  2026-08-13,40.24,0.02,26430000',
+        '  2026-08-14,39.90,-0.84,33120000',
+        '  ```',
+        '- 每行 CSV 四列：日期,收盘价,涨跌幅%,成交量(股)。日期用 YYYY-MM-DD，成交量单位股。数据来自 read_stock_kline 返回的 rows（volume 即成交量，change_pct 即涨跌幅）。',
     ];
     if (memoryItems.length > 0) {
         lines.push('', '[长期记忆]：');
@@ -810,16 +862,43 @@ function persistSessions() {
     return storageSet(chrome.storage.local, { [CHAT_KEY]: sessions });
 }
 
-// 保存当前会话：标题自动填充（首条用户消息前 20 字；手动改名后不再覆盖）
+// 自动会话标题只取可读文本，不能直接将多模态 content 数组转字符串，避免显示 [object Object]。
+function autoSessionTitle() {
+    const userMessages = chatMessages.filter(message => message.role === 'user');
+    // 图片首轮延后命名后，优先采用之后发送的普通文本消息。
+    const plainTextMessage = userMessages.find(message => typeof message.content === 'string' && message.content.trim());
+    const source = plainTextMessage || userMessages[0];
+    if (!source) return '新会话';
+    if (typeof source.content === 'string') return source.content.trim().slice(0, 20) || '新会话';
+    if (Array.isArray(source.content)) {
+        const text = source.content
+            .filter(part => part && part.type === 'text' && typeof part.text === 'string')
+            .map(part => part.text.trim())
+            .filter(Boolean)
+            .join(' ');
+        return text.slice(0, 20) || '新会话';
+    }
+    return '新会话';
+}
+
+// 保存当前会话：标题自动填充（首条用户消息前 20 字；手动改名后不再覆盖）。
+// 首条图片需临时切换视觉模型时延后命名，避免以图片占位文本作为会话名称。
 function saveChat() {
     if (!currentChatId || !sessions[currentChatId]) return Promise.resolve();
     const session = sessions[currentChatId];
     session.messages = chatMessages;
     session.updatedAt = Date.now();
-    if (!session.title || session.title === '新会话') {
-        session.title = (chatMessages.find(m => m.role === 'user')?.content || '新会话').slice(0, 20);
+    if ((!session.title || session.title === '新会话') && !session.deferAutoTitle) {
+        session.title = autoSessionTitle();
     }
     return persistSessions().then(renderSessionSelect);
+}
+
+function deferAutoTitleForVisionInput(content) {
+    if (!currentChatId || !sessions[currentChatId]) return;
+    const provider = selectRequestProvider([{ role: 'user', content }]);
+    if (provider.id !== activeProvider().id) sessions[currentChatId].deferAutoTitle = true;
+    else if (!latestUserMessageHasVisionInput([{ role: 'user', content }])) sessions[currentChatId].deferAutoTitle = false;
 }
 
 // 切换到指定会话
@@ -888,7 +967,16 @@ async function clearSession() {
 
 // ---------------- 接口配置（多份，手动切换） ----------------
 function defaultProvider(name) {
-    return { id: 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: name || '默认', baseUrl: DEFAULT_AI_BASE_URL, apiKey: '', model: DEFAULT_AI_MODEL };
+    return {
+        id: 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        name: name || '默认', baseUrl: DEFAULT_AI_BASE_URL, apiKey: '', model: DEFAULT_AI_MODEL,
+        supportsVision: false,
+    };
+}
+
+// 兼容旧配置，并为视觉能力字段补齐安全默认值。
+function normalizeProvider(provider) {
+    return { ...provider, supportsVision: provider.supportsVision === true };
 }
 
 // 工具调用轮数上限：clamp 到 1-50，非法回退默认值
@@ -900,14 +988,15 @@ function clampToolIterations(v) {
 
 // 读取配置：兼容旧版单配置键（aiBaseUrl/aiApiKey/aiModel）迁移
 async function loadProviders() {
-    const res = await storageGet(chrome.storage.sync, ['aiProviders', 'aiActiveProviderId', 'aiBaseUrl', 'aiApiKey', 'aiModel', 'aiMaxToolIterations']);
+    const res = await storageGet(chrome.storage.sync, ['aiProviders', 'aiActiveProviderId', 'aiDefaultVisionProviderId', 'aiBaseUrl', 'aiApiKey', 'aiModel', 'aiMaxToolIterations']);
     maxToolIterations = clampToolIterations(res.aiMaxToolIterations);
+    defaultVisionProviderId = typeof res.aiDefaultVisionProviderId === 'string' ? res.aiDefaultVisionProviderId : '';
     if (Array.isArray(res.aiProviders) && res.aiProviders.length > 0) {
-        providers = res.aiProviders;
+        providers = res.aiProviders.map(normalizeProvider);
         activeProviderId = providers.some(p => p.id === res.aiActiveProviderId) ? res.aiActiveProviderId : providers[0].id;
     } else if (res.aiBaseUrl || res.aiApiKey || res.aiModel) {
         // 旧版单配置迁移为第一份配置
-        providers = [{ id: 'p_default', name: '默认', baseUrl: res.aiBaseUrl || DEFAULT_AI_BASE_URL, apiKey: res.aiApiKey || '', model: res.aiModel || DEFAULT_AI_MODEL }];
+        providers = [normalizeProvider({ id: 'p_default', name: '默认', baseUrl: res.aiBaseUrl || DEFAULT_AI_BASE_URL, apiKey: res.aiApiKey || '', model: res.aiModel || DEFAULT_AI_MODEL })];
         activeProviderId = 'p_default';
         await storageSet(chrome.storage.sync, { aiProviders: providers, aiActiveProviderId: activeProviderId });
     } else {
@@ -923,7 +1012,11 @@ function activeProvider() {
 }
 
 async function persistProviders() {
-    await storageSet(chrome.storage.sync, { aiProviders: providers, aiActiveProviderId: activeProviderId });
+    await storageSet(chrome.storage.sync, {
+        providers,
+        aiActiveProviderId: activeProviderId,
+        aiDefaultVisionProviderId: defaultVisionProviderId,
+    });
 }
 
 function renderProviderSelect() {
@@ -937,6 +1030,29 @@ function renderProviderSelect() {
     aiProviderSelect.value = activeProviderId;
 }
 
+function renderDefaultVisionProviderSelect() {
+    aiDefaultVisionProviderSelect.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = '自动选择第一份支持视觉的配置';
+    aiDefaultVisionProviderSelect.appendChild(none);
+    for (const provider of providers) {
+        if (!provider.supportsVision) continue;
+        const opt = document.createElement('option');
+        opt.value = provider.id;
+        opt.textContent = `${provider.name || '未命名'}（${provider.model || '未配置模型'}）`;
+        aiDefaultVisionProviderSelect.appendChild(opt);
+    }
+    if (!providers.some(provider => provider.id === defaultVisionProviderId && provider.supportsVision)) {
+        if (defaultVisionProviderId !== '') {
+            // 校验失败：缓存值失效，同步清空并写回，避免内存与 storage 错位后被后续 persist 以空值覆盖
+            defaultVisionProviderId = '';
+            persistProviders().catch(() => { /* 同步失败静默 */ });
+        }
+    }
+    aiDefaultVisionProviderSelect.value = defaultVisionProviderId;
+}
+
 function fillProviderInputs() {
     const p = activeProvider();
     if (!p) return;
@@ -944,12 +1060,14 @@ function fillProviderInputs() {
     aiBaseUrlInput.value = p.baseUrl || '';
     aiApiKeyInput.value = p.apiKey || '';
     aiModelInput.value = p.model || '';
+    aiSupportsVisionInput.checked = p.supportsVision === true;
 }
 
 // 设置弹窗：切换配置（下拉）= 切换激活；字段修改 = 更新当前配置
 function openSettings() {
     renderProviderSelect();
     fillProviderInputs();
+    renderDefaultVisionProviderSelect();
     aiMaxToolIterationsInput.value = maxToolIterations;
     aiSettingsOverlay.style.display = 'flex';
 }
@@ -961,9 +1079,10 @@ function closeSettings() {
 function bindProviderEvents() {
     // 下拉切换：切换激活配置并回填
     aiProviderSelect.addEventListener('change', async () => {
+        // 先同步回填界面。若等待 storage 写入，onChanged 的异步回调可能抢先按旧配置重绘。
         activeProviderId = aiProviderSelect.value;
-        await persistProviders();
         fillProviderInputs();
+        await persistProviders();
     });
     // 新增配置
     aiProviderAddBtn.addEventListener('click', async () => {
@@ -999,12 +1118,23 @@ function bindProviderEvents() {
     bindInput(aiBaseUrlInput, 'baseUrl');
     bindInput(aiApiKeyInput, 'apiKey');
     bindInput(aiModelInput, 'model');
+    aiSupportsVisionInput.addEventListener('change', async () => {
+        const p = activeProvider();
+        if (!p) return;
+        p.supportsVision = aiSupportsVisionInput.checked;
+        await persistProviders();
+        renderDefaultVisionProviderSelect();
+    });
     // 工具调用轮数上限：即改即存
     aiMaxToolIterationsInput.addEventListener('change', () => {
         const v = clampToolIterations(aiMaxToolIterationsInput.value);
         aiMaxToolIterationsInput.value = v;
         maxToolIterations = v;
         chrome.storage.sync.set({ aiMaxToolIterations: v });
+    });
+    aiDefaultVisionProviderSelect.addEventListener('change', async () => {
+        defaultVisionProviderId = aiDefaultVisionProviderSelect.value;
+        await persistProviders();
     });
 }
 
@@ -1042,11 +1172,10 @@ function handlePortMessage(message) {
     }
 }
 
-// 单轮流式往返：当前配置随请求携带（SW 无状态）
-function sendRound(apiMessages, tools, { stream = true } = {}) {
+// 单轮流式往返：调用方指定的配置随请求携带（SW 无状态）。
+function sendRound(apiMessages, tools, { stream = true, provider = activeProvider() } = {}) {
     return new Promise((resolve) => {
         const requestId = ++currentRequestId;
-        const provider = activeProvider();
         let content = '';
         const timeoutId = setTimeout(() => {
             // 页面侧兜底超时：SW 无声死亡时也能恢复 UI
@@ -1077,14 +1206,44 @@ function sendRound(apiMessages, tools, { stream = true } = {}) {
     });
 }
 
+// 检查指定消息是否含 OpenAI 兼容格式的图片块。
+function messageHasVisionInput(message) {
+    return Array.isArray(message && message.content)
+        && message.content.some(part => part && part.type === 'image_url');
+}
+
+// 仅检查本次新发送的最后一条用户消息是否含 OpenAI 兼容格式的图片块。
+function latestUserMessageHasVisionInput(messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i];
+        if (message.role !== 'user') continue;
+        return messageHasVisionInput(message);
+    }
+    return false;
+}
+
+// 会话历史含图片时必须持续使用视觉模型，否则 OpenAI 兼容接口会拒绝 image_url。
+// 全局默认视觉模型优先，未指定时取第一份支持视觉的配置。
+function selectRequestProvider(messages) {
+    const current = activeProvider();
+    const hasAnyVisionInput = messages.some(messageHasVisionInput);
+    if (!hasAnyVisionInput || current.supportsVision) return current;
+    return providers.find(p => p.id === defaultVisionProviderId && p.supportsVision)
+        || providers.find(p => p.supportsVision)
+        || current;
+}
+
 // ---------------- function-calling 循环 ----------------
 // initialMessages：可选，指定起始 apiMessages（重试用快照）；默认从会话历史构建
 async function runAgentLoop(initialMessages) {
     const apiMessages = initialMessages || chatMessages.map(m => ({ role: m.role, content: m.content }));
+    const requestProvider = selectRequestProvider(apiMessages);
+    const switchedForVision = requestProvider.id !== activeProvider().id;
+    if (switchedForVision) appendMessage('system', `检测到图片，已临时切换到视觉模型「${requestProvider.name || requestProvider.model}」处理本次请求`);
     for (let round = 0; round < maxToolIterations; round++) {
         currentAssistantEl = null; // 每轮新建气泡（工具往返后流式内容不能追加到上一轮气泡）
         const requestMessages = [buildSystemPrompt(), ...apiMessages];
-        let result = await sendRound(requestMessages, TOOL_DEFS, { stream: true });
+        let result = await sendRound(requestMessages, TOOL_DEFS, { stream: true, provider: requestProvider });
         if (!result.ok) {
             if (result.aborted) {
                 // 用户主动停止：保留已生成的部分文本
@@ -1095,7 +1254,7 @@ async function runAgentLoop(initialMessages) {
             if (result.retriable) {
                 // 流式失败自动降级一次非流式
                 appendMessage('system', '流式响应中断，改用非流式重试…');
-                result = await sendRound(requestMessages, TOOL_DEFS, { stream: false });
+                result = await sendRound(requestMessages, TOOL_DEFS, { stream: false, provider: requestProvider });
             }
             if (!result.ok) {
                 const errorEl = appendMessage('error', result.error || '请求失败');
@@ -1238,6 +1397,7 @@ function mdToHtml(text) {
     let html = '';
     let inCode = false;
     let codeBuf = [];
+    let codeLang = ''; // 当前代码围栏语言（小写）
     let listType = null; // 'ul' | 'ol'
     const para = [];
     let tableBuf = null; // 连续表格行缓冲（含表头/分隔行/数据行）
@@ -1276,12 +1436,19 @@ function mdToHtml(text) {
     };
 
     for (const line of lines) {
-        if (/^```/.test(line)) {
+        const fence = line.match(/^```([A-Za-z0-9_-]*)\s*$/);
+        if (fence) {
             if (inCode) {
-                html += '<pre><code>' + codeBuf.join('\n') + '</code></pre>';
-                codeBuf = []; inCode = false;
+                // 关闭围栏：stockchart 渲染为成交量柱状图，其余按代码块
+                if (codeLang === 'stockchart') {
+                    html += renderVolumeChart(codeBuf);
+                } else {
+                    html += '<pre><code>' + codeBuf.join('\n') + '</code></pre>';
+                }
+                codeBuf = []; inCode = false; codeLang = '';
             } else {
-                flushPara(); flushList(); flushTable(); inCode = true;
+                flushPara(); flushList(); flushTable();
+                inCode = true; codeLang = (fence[1] || '').toLowerCase();
             }
             continue;
         }
@@ -1333,8 +1500,46 @@ function mdToHtml(text) {
         }
     }
     flushPara(); flushList(); flushTable();
-    if (inCode) html += '<pre><code>' + codeBuf.join('\n') + '</code></pre>'; // 未闭合围栏兜底
+    // 未闭合围栏兜底
+    if (inCode) {
+        if (codeLang === 'stockchart') html += renderVolumeChart(codeBuf);
+        else html += '<pre><code>' + codeBuf.join('\n') + '</code></pre>';
+    }
     return html || '<p></p>';
+}
+
+// 成交量红绿柱状图（A股习惯：红涨绿跌）。输入为 stockchart 围栏内的行，
+// 每行 CSV：日期,收盘价,涨跌幅%,成交量(股)。示例：
+//   2026-08-06,40.25,-0.05,36750000
+// 返回 <div class="stock-chart"> 结构（列数不足或数据为空时返回空字符串）。
+function renderVolumeChart(lines) {
+    const rows = [];
+    for (const raw of lines) {
+        const cells = String(raw).split(',').map(s => s.trim()).filter((s, i) => i === 0 || s !== '');
+        if (cells.length < 4) continue;
+        const date = cells[0];
+        const close = parseFloat(cells[1]);
+        const pct = parseFloat(cells[2]);
+        const vol = parseFloat(cells[3]);
+        if (!date || !Number.isFinite(close) || !Number.isFinite(pct) || !Number.isFinite(vol)) continue;
+        rows.push({ date, close, pct, vol });
+    }
+    if (!rows.length) return '';
+    const maxVol = Math.max(...rows.map(r => r.vol)) || 1;
+    // 高度按成交量比例（最小可见高度，成交量 0 时显示 2px 底线）
+    const bars = rows.map(r => {
+        const h = Math.max(Math.round(r.vol / maxVol * 100), r.vol > 0 ? 6 : 2);
+        const cls = r.pct >= 0 ? 'up' : 'down';
+        const volFmt = r.vol >= 1e8 ? (r.vol / 1e8).toFixed(2) + '亿' : (r.vol >= 1e4 ? (r.vol / 1e4).toFixed(0) + '万' : String(r.vol));
+        return '<div class="vbar ' + cls + '" style="height:' + h + '%" title="' +
+            escapeHtml(r.date + '  收 ' + r.close + '  ' + (r.pct > 0 ? '+' : '') + r.pct + '%  量 ' + volFmt) + '"></div>';
+    }).join('');
+    const dates = rows.map(r => '<span>' + escapeHtml(r.date.slice(5)) + '</span>').join('');
+    return '<div class="stock-chart">' +
+        '<div class="vchart-bars">' + bars + '</div>' +
+        '<div class="vchart-dates">' + dates + '</div>' +
+        '<div class="vchart-legend"><span class="up">■ 上涨</span><span class="down">■ 下跌</span></div>' +
+        '</div>';
 }
 
 // 消息渲染：Markdown 安全渲染（防 XSS）；content 可为多模态数组
@@ -1560,20 +1765,23 @@ async function refreshDirStatus() {
     }));
 }
 
-// ---------------- 文件上传（复制到主工作目录 + 加载到上下文） ----------------
+// ---------------- 文件上传（复制到主工作目录/llm_context_files + 加载到上下文） ----------------
+const LLM_CONTEXT_FILES_DIR = 'llm_context_files';
+
 // 上传按钮状态：未设置工作目录时置灰并提示
 function renderUploadState() {
     const ok = workspaceHandles.length > 0;
     uploadBtn.disabled = !ok;
-    uploadBtn.title = ok ? '上传文件到工作目录并加载到上下文' : '请先设置工作目录后再上传文件';
+    uploadBtn.title = ok ? '上传文件到 llm_context_files 并加载到上下文' : '请先设置工作目录后再上传文件';
 }
 
-// 目标文件名防重名：已存在则追加 _1/_2…（保留扩展名）
+// 目标文件名防重名：已存在则追加 _1/_2…（保留扩展名）。目录不存在时自动创建。
 async function uniqueUploadName(rootHandle, name) {
+    const uploadDir = await rootHandle.getDirectoryHandle(LLM_CONTEXT_FILES_DIR, { create: true });
     let candidate = name;
     let i = 1;
     for (; ;) {
-        try { await rootHandle.getFileHandle(candidate); } catch { return candidate; }
+        try { await uploadDir.getFileHandle(candidate); } catch { return candidate; }
         const dot = name.lastIndexOf('.');
         candidate = (dot > 0 ? name.slice(0, dot) + '_' + i + name.slice(dot) : name + '_' + i);
         i++;
@@ -1581,9 +1789,9 @@ async function uniqueUploadName(rootHandle, name) {
 }
 
 // 上传处理：
-//   图片（png/jpeg/gif/webp）→ 以多模态 image_url 消息传给模型（视觉输入，不落文本）；
-//   其它文件 → 仅告知模型「文件已复制到工作目录」，内容由模型经 read_file 工具自行读取。
-// 一律不把文件内容打印到对话，也不塞进上下文文本。
+//   图片（png/jpeg/gif/webp）→ 以多模态 image_url 消息传给模型；
+//   其它文件 → 告知模型其位于 llm_context_files，内容由模型经 read_file 工具自行读取。
+// 所有上传内容均保存到主工作目录的 llm_context_files 子目录。
 async function handleUploadFiles(files) {
     if (!files || files.length === 0) return;
     if (!workspaceHandles.length) { alert('请先设置工作目录：点击窗口顶部「选择目录」授权后即可上传文件'); return; }
@@ -1592,15 +1800,16 @@ async function handleUploadFiles(files) {
     const parts = []; // content 块（多模态数组）
     let imageCount = 0;
     for (const file of files) {
-        const target = await uniqueUploadName(dir.handle, file.name);
-        await writeUpload(dir.handle, target, file); // 复制到工作目录
+        const name = await uniqueUploadName(dir.handle, file.name);
+        const target = LLM_CONTEXT_FILES_DIR + '/' + name;
+        await writeUpload(dir.handle, target, file); // 复制到工作目录的上下文文件目录
         if (imageTypes.test(file.type || '')) {
             imageCount++;
             const dataUrl = await readFileAsDataURL(file);
-            parts.push({ type: 'text', text: `[用户上传图片：${target}，已复制到工作目录]` });
+            parts.push({ type: 'text', text: `[用户上传图片：${target}，已保存到工作目录]` });
             parts.push({ type: 'image_url', image_url: { url: dataUrl } });
         } else {
-            parts.push({ type: 'text', text: `[用户上传文件：${target}，已复制到工作目录，可用 read_file 工具读取]` });
+            parts.push({ type: 'text', text: `[用户上传文件：${target}，已保存到工作目录，可用 read_file 工具读取]` });
         }
         dbg('上传文件已写入工作目录:', target, file.size, '字节');
     }
@@ -1608,10 +1817,11 @@ async function handleUploadFiles(files) {
     await ensureChat();
     chatMessages.push({ role: 'user', content: parts, ts: Date.now(), uid: genUid('m') });
     trimChat();
+    deferAutoTitleForVisionInput(parts);
     saveChat();
     appendMessage('user', parts);
     appendMessage('system',
-        files.length + ' 个文件已复制到工作目录'
+        files.length + ' 个文件已保存到工作目录/' + LLM_CONTEXT_FILES_DIR
         + (imageCount ? `，其中 ${imageCount} 张图片已作为视觉输入传给模型` : '，文件内容未打印，可让 AI 用 read_file 读取'));
 }
 
@@ -1849,7 +2059,7 @@ async function handleSend() {
     await ensureChat();
     followStream = true; // 发送后应能看到自己最新的消息
     scrollDownBtn.hidden = true;
-    // 组装内容：文本 + 粘贴图片（多模态；图片已授权时顺带复制到工作目录）
+    // 组装内容：文本 + 粘贴图片（多模态；图片已授权时保存至 llm_context_files）
     let content = text;
     let imageCount = 0;
     if (pendingImages.length > 0) {
@@ -1862,7 +2072,9 @@ async function handleSend() {
                 if (workspaceHandles.length) {
                     const dir = await readyRoot(workspaceHandles, '');
                     const name = await uniqueUploadName(dir.handle, img.name || 'paste.png');
-                    await writeUpload(dir.handle, name, img.file);
+                    const target = LLM_CONTEXT_FILES_DIR + '/' + name;
+                    await writeUpload(dir.handle, target, img.file);
+                    parts.push({ type: 'text', text: `[用户粘贴图片：${target}，已保存到工作目录]` });
                 }
             } catch (err) {
                 console.warn('[thswc:ai] 粘贴图片写入工作目录失败:', err);
@@ -1874,6 +2086,7 @@ async function handleSend() {
     appendMessage('user', content);
     chatMessages.push({ role: 'user', content, ts: Date.now(), uid: genUid('m') });
     trimChat();
+    deferAutoTitleForVisionInput(content);
     saveChat();
     chatInput.value = '';
     pendingImages = [];
@@ -1995,10 +2208,11 @@ async function init() {
     // popup 全局设置改动时实时同步（两窗口同源）
     chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== 'sync') return;
-        if (changes.aiProviders || changes.aiActiveProviderId) {
+        if (changes.aiProviders || changes.aiActiveProviderId || changes.aiDefaultVisionProviderId) {
             loadProviders().then(() => {
                 renderProviderSelect();
                 fillProviderInputs();
+                renderDefaultVisionProviderSelect();
             });
         }
     });
